@@ -8,7 +8,7 @@ pub enum Line {
 pub enum Token {
     RawText(String),
     Target {
-        name: String,
+        target: String,
         ip: Option<String>,
         command: String,
     },

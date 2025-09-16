@@ -10,6 +10,8 @@ const DEFAULT_PATH_CANDIDATES: [&str; 3] = ["Makefile", "makefile", "GNUMakefile
 const NO_MAKEFILE_FOUND: &str = "dake: *** No targets specified and no makefile found.  Stop.";
 
 pub fn lex(s: String) -> Result<Makefile> {
+    const FORBIDDEN_RIGHT_PREFIX: [&str; 1] = ["="];
+
     fn generate_lines(s: &str) -> Vec<Line> {
         let mut lines = Vec::new();
         let mut lines_iter = s.lines();
@@ -21,13 +23,18 @@ pub fn lex(s: String) -> Result<Makefile> {
                 .unwrap_or((line.to_string(), ()));
 
             fn push_line(lines: &mut Vec<Line>, line: &str) {
-                let line = line.trim();
                 if line.is_empty() {
                     return;
                 }
                 let line = match line.split_once(':') {
-                    Some((left, right)) => Line::ColonLine(left.to_string(), right.to_string()),
-                    None => Line::RawLine(line.to_string()),
+                    Some((left, right)) => {
+                        if FORBIDDEN_RIGHT_PREFIX.iter().any(|s| right.starts_with(s)) {
+                            Line::RawLine(format!("{line}\n"))
+                        } else {
+                            Line::ColonLine(left.to_string(), format!("{right}\n"))
+                        }
+                    }
+                    None => Line::RawLine(format!("{line}\n")),
                 };
                 lines.push(line);
             }
@@ -74,8 +81,8 @@ pub fn lex(s: String) -> Result<Makefile> {
                     let mut rest = left.trim();
                     let mut left_parsed = None;
 
-                    while let Some(open) = rest.find('(') {
-                        if let Some(close) = rest[open..].find(')') {
+                    while let Some(open) = rest.find('[') {
+                        if let Some(close) = rest[open..].find(']') {
                             let prefix = rest[..open].trim();
                             let inside = &rest[open + 1..open + close].trim();
 
@@ -91,13 +98,13 @@ pub fn lex(s: String) -> Result<Makefile> {
                     }
 
                     let token = match left_parsed {
-                        Some((ip, name)) => Token::Target {
-                            name: name.to_string(),
+                        Some((ip, target)) => Token::Target {
+                            target: target.to_string(),
                             ip: Some(ip),
                             command: right,
                         },
                         None => Token::Target {
-                            name: left.to_string(),
+                            target: left.to_string(),
                             ip: None,
                             command: right,
                         },
@@ -167,8 +174,12 @@ mod tests {
         let mf = lex("foo: bar".into()).unwrap();
         assert_eq!(mf.lines(), &[Line::ColonLine("foo".into(), " bar".into())]);
         match &mf.tokens()[0] {
-            Token::Target { name, ip, command } => {
-                assert_eq!(name, "foo");
+            Token::Target {
+                target,
+                ip,
+                command,
+            } => {
+                assert_eq!(target, "foo");
                 assert!(ip.is_none());
                 assert_eq!(command, " bar");
             }
@@ -180,8 +191,10 @@ mod tests {
     fn test_line_continuation() {
         let mf = lex("foo: bar \\\n baz".into()).unwrap();
         match &mf.tokens()[0] {
-            Token::Target { name, command, .. } => {
-                assert_eq!(name, "foo");
+            Token::Target {
+                target, command, ..
+            } => {
+                assert_eq!(target, "foo");
                 assert!(command.contains("bar"));
                 assert!(command.contains("baz"));
             }
@@ -193,8 +206,12 @@ mod tests {
     fn test_parentheses_ip_parsing() {
         let mf = lex("foo(ip1): echo hi".into()).unwrap();
         match &mf.tokens()[0] {
-            Token::Target { name, ip, command } => {
-                assert_eq!(name, "foo");
+            Token::Target {
+                target,
+                ip,
+                command,
+            } => {
+                assert_eq!(target, "foo");
                 assert_eq!(ip.as_deref(), Some("ip1"));
                 assert_eq!(command, " echo hi");
             }
