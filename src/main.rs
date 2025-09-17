@@ -1,8 +1,17 @@
+mod caller;
+mod deamon;
+mod fetch;
+
+use std::env::args;
+
 use anyhow::Result;
-use dake::lexer::{guess_path_and_lex, Makefile};
 
 fn main() -> Result<()> {
-    let makefile: Makefile = guess_path_and_lex()?;
-    println!("{makefile:?}");
+    let mut args = args().skip(1);
+    match args.next().as_deref() {
+        Some("fetch") => fetch::fetch(),
+        Some("deamon") => deamon::start(),
+        _ => caller::make(args.collect())?,
+    }
     Ok(())
 }

@@ -4,7 +4,7 @@ use crate::lexer::tokens::{Line, Token};
 use derive_getters::Getters;
 
 fn get_fetch_command(ip: String, target: String) -> String {
-    format!("dake_deamon fetch \"{ip}\" \"{target}\"")
+    format!("target/debug/dake fetch \"{ip}\" \"{target}\"\n")
 }
 
 #[derive(Debug, Getters)]
