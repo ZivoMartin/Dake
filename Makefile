@@ -1,8 +1,8 @@
 main: liba libb
 	echo "Building main"
 
-liba[ip1]:
+liba[127.0.0.1]:
 	echo "Building liba"
 
-libb[ip2]:
+libb[127.0.0.1]:
 	echo "Building libb"
