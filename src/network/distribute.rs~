@@ -1,0 +1,31 @@
+use super::RemoteMakefile;
+use anyhow::Result;
+use std::net::SocketAddr;
+use tokio::{net::TcpListener, sync::mpsc};
+
+use crate::{
+    network::{DeamonMessage, get_deamon_address, utils::send_message},
+    wrap,
+};
+
+pub async fn distribute(makefiles: Vec<RemoteMakefile>) -> Result<()> {
+    let mut caller_ip = get_deamon_address();
+    caller_ip.set_port(0);
+    let listener = TcpListener::bind(caller_ip).await?;
+    caller_ip = listener.local_addr()?;
+
+    let host_amount = makef
+        
+
+    for mut makefile in makefiles {
+        let ip = *makefile.ip();
+        makefile.set_ip(caller_ip);
+        send_message(DeamonMessage::Distribute(makefile), ip).await?;
+    }
+
+    let (sender, receiver) = mpsc::channel(100);
+    
+    loop {}
+
+    Ok(())
+}
