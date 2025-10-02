@@ -1,3 +1,5 @@
+use crate::target_label::TargetLabel;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Line {
     RawLine(String),
@@ -9,7 +11,7 @@ pub enum Token {
     RawText(String),
     Target {
         target: String,
-        ip: Option<String>,
+        label: Option<TargetLabel>,
         command: String,
     },
 }

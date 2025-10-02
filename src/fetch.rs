@@ -1,0 +1,76 @@
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use log::warn;
+use tokio::{net::TcpListener, select, time::sleep};
+
+use crate::{
+    dec,
+    network::{DeamonMessage, FetcherMessage, MessageKind, read_next_message, send_message},
+    target_label::TargetLabel,
+};
+
+pub async fn fetch(label: TargetLabel, target: String) -> Result<()> {
+    let sock = label.sock;
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .context("When starting the fetcher socket.")?;
+    let fetcher_addr = listener
+        .local_addr()
+        .context("When requesting the fetcher socket address")?;
+
+    let message = DeamonMessage::Fetch {
+        target,
+        sock: fetcher_addr,
+    };
+
+    send_message(message, sock).await?;
+
+    loop {
+        let mut tcp_stream = match listener.accept().await {
+            Ok((tcp_stream, remote_sock)) => {
+                if remote_sock == sock {
+                    tcp_stream
+                } else {
+                    warn!(
+                        "The fetcher should only receiv messages from the specified remote deamon. Was waiting for {sock}, received {remote_sock}."
+                    );
+                    continue;
+                }
+            }
+            Err(e) => {
+                warn!("The listener failed to accept a connection due to {e}.");
+                continue;
+            }
+        };
+
+        select! {
+            _ = sleep(Duration::from_secs(30)) => todo!(),
+            msg = read_next_message(&mut tcp_stream, MessageKind::FetcherMessage) => {
+                let msg = match msg {
+                    Ok(Some(msg)) => msg,
+                    Ok(None) => {
+                        warn!(
+                            "Failed to fetch a message, the connection has been closed."
+                        );
+                        break;
+                    }
+                    Err(e) => {
+                        warn!("Failed to fetch a message: {e}",);
+                        continue;
+                    }
+                };
+
+                let msg: FetcherMessage = dec!(msg)?;
+                match msg {
+                    FetcherMessage::Object(_obj) => {
+                        todo!()
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}

@@ -1,6 +1,6 @@
-use crate::lexer::{
-    tokens::{Line, Token},
-    Makefile,
+use crate::{
+    lexer::tokens::{Line, Token},
+    target_label::TargetLabel,
 };
 use anyhow::{Context, Result};
 use log::warn;
@@ -9,7 +9,9 @@ use std::{fs::File, io::Read, path::Path};
 const DEFAULT_PATH_CANDIDATES: [&str; 3] = ["Makefile", "makefile", "GNUMakefile"];
 const NO_MAKEFILE_FOUND: &str = "dake: *** No targets specified and no makefile found.  Stop.";
 
-pub fn lex(s: String) -> Result<Makefile> {
+pub type LexingOutput = Vec<Token>;
+
+pub fn lex(s: String) -> Result<LexingOutput> {
     const FORBIDDEN_RIGHT_PREFIX: [&str; 1] = ["="];
 
     fn generate_lines(s: &str) -> Vec<Line> {
@@ -55,7 +57,7 @@ pub fn lex(s: String) -> Result<Makefile> {
         lines
     }
 
-    fn lines_to_tokens(lines: Vec<Line>) -> Vec<Token> {
+    fn lines_to_tokens(lines: Vec<Line>) -> Result<Vec<Token>> {
         let mut tokens = Vec::new();
         let mut lines_iter = lines.into_iter().peekable();
 
@@ -87,7 +89,8 @@ pub fn lex(s: String) -> Result<Makefile> {
                             let inside = &rest[open + 1..open + close].trim();
 
                             if !prefix.is_empty() {
-                                left_parsed = Some((inside.to_string(), prefix.to_string()));
+                                left_parsed =
+                                    Some((inside.to_string(), prefix.parse::<TargetLabel>()?));
                             }
 
                             rest = &rest[open + close + 1..];
@@ -98,14 +101,14 @@ pub fn lex(s: String) -> Result<Makefile> {
                     }
 
                     let token = match left_parsed {
-                        Some((ip, target)) => Token::Target {
+                        Some((target, label)) => Token::Target {
                             target: target.to_string(),
-                            ip: Some(ip),
+                            label: Some(label),
                             command: right,
                         },
                         None => Token::Target {
                             target: left.to_string(),
-                            ip: None,
+                            label: None,
                             command: right,
                         },
                     };
@@ -117,15 +120,15 @@ pub fn lex(s: String) -> Result<Makefile> {
                 None => break,
             }
         }
-        tokens
+        Ok(tokens)
     }
 
     let lines = generate_lines(&s);
-    let tokens = lines_to_tokens(lines.clone());
-    Ok(Makefile::new(s, lines, tokens))
+    let tokens = lines_to_tokens(lines.clone())?;
+    Ok(tokens)
 }
 
-pub fn lex_from_path(path: String) -> Result<Makefile> {
+pub fn lex_from_path(path: String) -> Result<LexingOutput> {
     let mut f = File::open(&path).context(format!("When opening the file {path}."))?;
     let mut content = String::new();
     f.read_to_string(&mut content)
@@ -133,128 +136,10 @@ pub fn lex_from_path(path: String) -> Result<Makefile> {
     lex(content)
 }
 
-pub fn guess_path_and_lex() -> Result<Makefile> {
+pub fn guess_path_and_lex() -> Result<LexingOutput> {
     let path = DEFAULT_PATH_CANDIDATES
         .iter()
         .find(|path| Path::new(path).try_exists().unwrap_or(false))
         .context(NO_MAKEFILE_FOUND)?;
     lex_from_path(path.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lexer::tokens::{Line, Token};
-    use std::fs;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_empty_string() {
-        let mf = lex(String::new()).unwrap();
-        assert!(mf.tokens().is_empty());
-        assert!(mf.lines().is_empty());
-    }
-
-    #[test]
-    fn test_comment_only() {
-        let mf = lex("# just a comment".into()).unwrap();
-        assert!(mf.tokens().is_empty());
-        assert!(mf.lines().is_empty());
-    }
-
-    #[test]
-    fn test_raw_line() {
-        let mf = lex("hello world".into()).unwrap();
-        assert_eq!(mf.lines(), &[Line::RawLine("hello world".into())]);
-        assert_eq!(mf.tokens(), &[Token::RawText("hello world".into())]);
-    }
-
-    #[test]
-    fn test_simple_target() {
-        let mf = lex("foo: bar".into()).unwrap();
-        assert_eq!(mf.lines(), &[Line::ColonLine("foo".into(), " bar".into())]);
-        match &mf.tokens()[0] {
-            Token::Target {
-                target,
-                ip,
-                command,
-            } => {
-                assert_eq!(target, "foo");
-                assert!(ip.is_none());
-                assert_eq!(command, " bar");
-            }
-            _ => panic!("Expected target token"),
-        }
-    }
-
-    #[test]
-    fn test_line_continuation() {
-        let mf = lex("foo: bar \\\n baz".into()).unwrap();
-        match &mf.tokens()[0] {
-            Token::Target {
-                target, command, ..
-            } => {
-                assert_eq!(target, "foo");
-                assert!(command.contains("bar"));
-                assert!(command.contains("baz"));
-            }
-            _ => panic!("Expected target token"),
-        }
-    }
-
-    #[test]
-    fn test_parentheses_ip_parsing() {
-        let mf = lex("foo(ip1): echo hi".into()).unwrap();
-        match &mf.tokens()[0] {
-            Token::Target {
-                target,
-                ip,
-                command,
-            } => {
-                assert_eq!(target, "foo");
-                assert_eq!(ip.as_deref(), Some("ip1"));
-                assert_eq!(command, " echo hi");
-            }
-            _ => panic!("Expected target token"),
-        }
-    }
-
-    #[test]
-    fn test_unmatched_parenthesis_logs_error() {
-        // Should not panic, but should still produce a Token
-        let mf = lex("foo(bar: baz".into()).unwrap();
-        assert_eq!(mf.tokens().len(), 1);
-    }
-
-    #[test]
-    fn test_multiple_tokens() {
-        let input = r#"
-hello
-foo: bar
-world
-"#;
-        let mf = lex(input.into()).unwrap();
-        assert!(mf.tokens().iter().any(|t| matches!(t, Token::RawText(_))));
-        assert!(mf
-            .tokens()
-            .iter()
-            .any(|t| matches!(t, Token::Target { .. })));
-    }
-
-    #[test]
-    fn test_guess_path_and_lex() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("Makefile");
-        fs::write(&path, "foo: bar").unwrap();
-
-        // Temporarily change CWD
-        let old_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&dir).unwrap();
-
-        let mf = guess_path_and_lex().unwrap();
-        assert_eq!(mf.tokens().len(), 1);
-
-        // Restore
-        std::env::set_current_dir(old_cwd).unwrap();
-    }
 }

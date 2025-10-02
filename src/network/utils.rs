@@ -32,8 +32,8 @@ pub fn parse_raw_ip(raw_ip: &str) -> Result<SocketAddr> {
     })
 }
 
-pub async fn send_message<M: Message>(msg: M, ip: SocketAddr) -> Result<()> {
-    let mut stream = TcpStream::connect(ip)
+pub async fn send_message<M: Message>(msg: M, sock: SocketAddr) -> Result<()> {
+    let mut stream = TcpStream::connect(sock)
         .await
         .context("When connecting on the stream.")?;
     let enc_msg = MessageHeader::wrap(enc!(msg), msg.get_kind());
@@ -49,8 +49,8 @@ pub fn get_deamon_address() -> SocketAddr {
 }
 
 pub async fn contact_deamon<M: Message>(msg: M) -> Result<()> {
-    let ip = get_deamon_address();
-    send_message(msg, ip)
+    let sock = get_deamon_address();
+    send_message(msg, sock)
         .await
         .context("When contacting deamon.")
 }
@@ -91,7 +91,8 @@ pub async fn read_next_message(
 ) -> Result<Option<Vec<u8>>> {
     let header_length = MessageHeader::get_header_length();
     let mut header = vec![0; header_length];
-    if let Err(e) = tcp_stream.read_exact(&mut header).await {
+
+    if tcp_stream.read_exact(&mut header).await.is_err() {
         return Ok(None);
     }
 

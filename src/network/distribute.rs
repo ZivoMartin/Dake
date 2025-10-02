@@ -1,21 +1,22 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use log::warn;
-use std::{collections::HashSet, time::Duration};
-use tokio::{net::TcpListener, pin, select, sync::mpsc::channel, time::sleep};
+use std::{collections::HashSet, path::PathBuf, time::Duration};
+use tokio::{net::TcpListener, select, sync::mpsc::channel, time::sleep};
 
 use crate::{
     dec,
+    makefile::RemoteMakefile,
     network::{
-        DeamonMessage, MessageKind, RemoteMakefile, get_deamon_address,
-        messages::DistributerMessage, read_next_message, utils::send_message,
+        DeamonMessage, MessageKind, get_deamon_address, messages::DistributerMessage,
+        read_next_message, utils::send_message,
     },
 };
 
-pub async fn distribute(makefiles: Vec<RemoteMakefile>) -> Result<()> {
-    let mut caller_ip = get_deamon_address();
-    caller_ip.set_port(0);
-    let listener = TcpListener::bind(caller_ip).await?;
-    caller_ip = listener.local_addr()?;
+pub async fn distribute(makefiles: Vec<RemoteMakefile>, path: PathBuf) -> Result<()> {
+    let mut caller_sock = get_deamon_address();
+    caller_sock.set_port(0);
+    let listener = TcpListener::bind(caller_sock).await?;
+    caller_sock = listener.local_addr()?;
 
     let host_amount = makefiles.len();
 
@@ -24,9 +25,9 @@ pub async fn distribute(makefiles: Vec<RemoteMakefile>) -> Result<()> {
     }
 
     for mut makefile in makefiles {
-        let ip = *makefile.ip();
-        makefile.set_ip(caller_ip);
-        send_message(DeamonMessage::Distribute(makefile), ip).await?;
+        let ip = *makefile.sock();
+        makefile.set_sock(caller_sock);
+        send_message(DeamonMessage::Distribute(makefile, path.clone()), ip).await?;
     }
 
     let (sender, mut receiver) = channel(host_amount);
@@ -39,17 +40,25 @@ pub async fn distribute(makefiles: Vec<RemoteMakefile>) -> Result<()> {
     loop {
         select! {
             _ = &mut sleep_fut => bail!("The distributer timed out when waiting for acks."),
-            _ = receiver.recv() => {
-                ack_count += 1;
-                if ack_count == host_amount {
-                    break
+            message = receiver.recv() => {
+                match message.context("Distributer: Failed to receiv message from tokio channels.")? {
+                    (DistributerMessage::Ack, _) => {
+                        ack_count += 1;
+                        if ack_count == host_amount {
+                            break
+                        }
+                    },
+                    (DistributerMessage::Failed, sock) => {
+                        bail!("Received a failed message from: {sock}")
+                    }
                 }
+
             },
             tcp_stream = listener.accept() => {
-                let (mut tcp_stream, addr) = tcp_stream?;
+                let (mut tcp_stream, sock) = tcp_stream?;
 
-                if !set.insert(addr) {
-                    warn!("Distributer: The same address returned twice an acknowledgment: {addr}");
+                if !set.insert(sock) {
+                    warn!("Distributer: The same address returned twice an acknowledgment: {sock}");
                     continue
                 }
 
@@ -77,14 +86,9 @@ pub async fn distribute(makefiles: Vec<RemoteMakefile>) -> Result<()> {
                         }
                     };
 
-                    match message {
-                        DistributerMessage::Ack => {
-                            if let Err(e) = sender.send(()).await {
-                                warn!("Distributer: Failed to notify for ack from {addr}: {e}");
-                            }
-                        }
+                    if let Err(e) = sender.send((message, sock)).await {
+                        warn!("Distributer: Failed to notify for the message received from {sock}: {e}");
                     }
-
                 });
 
             }

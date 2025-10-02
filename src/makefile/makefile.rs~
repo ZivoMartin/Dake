@@ -1,24 +1,23 @@
 use std::collections::HashSet;
 
-use crate::lexer::tokens::{Line, Token};
+use crate::{lexer::tokens::Token, target_label::TargetLabel};
 use derive_getters::Getters;
 use log::warn;
 
-fn get_fetch_command(ip: String, target: String) -> String {
+fn get_fetch_command(ip: TargetLabel, target: String) -> String {
     format!("target/debug/dake fetch \"{ip}\" \"{target}\"\n")
 }
 
 #[derive(Debug, Getters)]
 pub struct Makefile {
     raw: String,
-    lines: Vec<Line>,
     tokens: Vec<Token>,
 }
 
 #[derive(Getters, Debug, Clone)]
 pub struct RemoteMakefile {
     ip: String,
-    makefile: String,
+    makefile: 
 }
 
 impl RemoteMakefile {
@@ -43,8 +42,8 @@ impl RemoteMakefileSet {
 }
 
 impl Makefile {
-    pub fn new(raw: String, lines: Vec<Line>, tokens: Vec<Token>) -> Self {
-        Makefile { raw, lines, tokens }
+    pub fn new(raw: String, tokens: Vec<Token>) -> Self {
+        Makefile { raw, tokens }
     }
 
     pub fn generate(&self, caller_ip: String) -> RemoteMakefileSet {

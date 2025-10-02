@@ -5,12 +5,15 @@ use tokio::{net::TcpListener, task::spawn};
 use crate::{
     dec,
     network::{
-        MessageKind, get_deamon_address, messages::DeamonMessage, new_process::new_process,
+        MessageKind, fetch_handler::handle_fetch, fs::init_fs, get_deamon_address,
+        makefile_receiver::receiv_makefile, messages::DeamonMessage, new_process::new_process,
         utils::read_next_message,
     },
 };
 
 pub async fn start() -> Result<()> {
+    init_fs()?;
+
     let listener = TcpListener::bind(get_deamon_address())
         .await
         .context("When starting the deamon.")?;
@@ -48,7 +51,10 @@ pub async fn start() -> Result<()> {
                             entry_makefile_dir,
                             args,
                         } => new_process(makefiles, caller_addr, entry_makefile_dir, args).await,
-                        DeamonMessage::Distribute(_makefile) => todo!(),
+                        DeamonMessage::Distribute(makefile, path) => {
+                            receiv_makefile(makefile, path).await
+                        }
+                        DeamonMessage::Fetch { target, sock } => handle_fetch(target, sock).await,
                     }
                 });
             }

@@ -1,9 +1,8 @@
 use std::{net::SocketAddr, path::PathBuf};
 
-use crate::network::RemoteMakefile;
 use serde::{Deserialize, Serialize};
 
-use crate::enc;
+use crate::{enc, makefile::RemoteMakefile};
 
 pub trait Message: Clone + Serialize + for<'a> Deserialize<'a> + Send {
     fn get_kind(&self) -> MessageKind;
@@ -21,6 +20,7 @@ pub enum MessageKind {
     DeamonMessage,
     ProcessMessage,
     DistributerMessage,
+    FetcherMessage,
 }
 
 impl MessageHeader {
@@ -48,7 +48,11 @@ pub enum DeamonMessage {
         entry_makefile_dir: PathBuf,
         args: Vec<String>,
     },
-    Distribute(RemoteMakefile),
+    Distribute(RemoteMakefile, PathBuf),
+    Fetch {
+        target: String,
+        sock: SocketAddr,
+    },
 }
 
 impl Message for DeamonMessage {
@@ -71,10 +75,22 @@ impl Message for ProcessMessage {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum DistributerMessage {
     Ack,
+    Failed,
 }
 
 impl Message for DistributerMessage {
     fn get_kind(&self) -> MessageKind {
         MessageKind::DistributerMessage
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum FetcherMessage {
+    Object(Vec<u8>),
+}
+
+impl Message for FetcherMessage {
+    fn get_kind(&self) -> MessageKind {
+        MessageKind::FetcherMessage
     }
 }

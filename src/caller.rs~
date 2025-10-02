@@ -1,26 +1,31 @@
-use std::{env::current_dir, fs::write, time::Duration};
+use std::{env::current_dir, fs::write, process::Command, thread::spawn, time::Duration};
 
-use crate::{lexer::guess_path_and_lex, makefile::RemoteMakefileSet, network::DEFAULT_SOCK};
 use anyhow::{Context, Result};
+use dake::lexer::{Makefile, guess_path_and_lex};
 use log::warn;
 use tokio::{net::TcpListener, time::timeout};
 
 use crate::{
     dec,
     network::{
-        DeamonMessage, MessageKind, ProcessMessage, contact_deamon_or_start_it, get_deamon_address,
-        read_next_message,
+        DeamonMessage, MessageKind, ProcessMessage, RemoteMakefile, contact_deamon_or_start_it,
+        get_deamon_address, read_next_message,
     },
 };
+
 const TMP_MAKEFILE_NAME: &'static str = "dake_tmp_makefile";
 
 pub async fn make(mut args: Vec<String>) -> Result<()> {
-    let caller_dir = current_dir()?;
-    let caller_sock = DEFAULT_SOCK;
-    let tokens = guess_path_and_lex()?;
-    let makefiles = RemoteMakefileSet::generate(tokens, caller_dir.clone(), caller_sock);
+    let makefile: Makefile = guess_path_and_lex()?;
+    let makefiles = makefile.generate("my ip".to_string());
 
     write(TMP_MAKEFILE_NAME, makefiles.my_makefile())?;
+
+    let makefiles = makefiles
+        .remote_makefiles()
+        .into_iter()
+        .map(|m| RemoteMakefile::try_from(m.clone()))
+        .collect::<Result<Vec<RemoteMakefile>>>()?;
 
     args.append(&mut vec![
         String::from("--file"),
@@ -35,10 +40,10 @@ pub async fn make(mut args: Vec<String>) -> Result<()> {
         .context("When requesting the caller socket address")?;
 
     let message = DeamonMessage::NewProcess {
-        makefiles: makefiles.drop_makefiles(),
+        makefiles,
         caller_addr,
         args,
-        entry_makefile_dir: caller_dir,
+        entry_makefile_dir: current_dir()?,
     };
 
     contact_deamon_or_start_it(message).await?;
@@ -75,7 +80,10 @@ pub async fn make(mut args: Vec<String>) -> Result<()> {
                     break;
                 }
                 Err(e) => {
-                    warn!("Failed to receiv a message from the caller: {e}",);
+                    warn!(
+                        "Failed to receiv a message from the caller: {}",
+                        e.root_cause()
+                    );
                     continue;
                 }
             };
