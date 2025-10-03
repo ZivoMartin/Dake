@@ -1,5 +1,0 @@
-use std::net::SocketAddr;
-
-pub async fn handle_fetch(target: String, sock: SocketAddr) {
-    todo!()
-}

@@ -1,5 +1,17 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
-pub async fn handle_fetch(_target: String, _sock: SocketAddr) {
+use crate::process_id::ProcessId;
+
+pub async fn handle_fetch(
+    _pid: ProcessId,
+    _client: SocketAddr,
+    _target: String,
+    _labeled_path: Option<PathBuf>,
+) {
     todo!()
+    // Command::new("make")
+    //     .arg(target)
+    //     .current_dir()
+    //     .status()
+    // .unwrap();
 }

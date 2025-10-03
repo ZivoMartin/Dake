@@ -3,11 +3,10 @@ use blake3::{self, Hash};
 use directories::ProjectDirs;
 use std::{
     fs::{create_dir_all, write},
-    net::SocketAddr,
     path::PathBuf,
 };
 
-use crate::makefile::RemoteMakefile;
+use crate::{makefile::RemoteMakefile, process_id::ProcessId};
 
 fn get_dake_path() -> Result<PathBuf> {
     ProjectDirs::from("com", "zivo_martin", "dake")
@@ -28,22 +27,22 @@ pub fn init_fs() -> Result<PathBuf> {
     Ok(path)
 }
 
-fn hash_socket_path(addr: &SocketAddr, path: &PathBuf) -> Hash {
+fn hash_socket_path(pid: &ProcessId) -> Hash {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(addr.ip().to_string().as_bytes());
-    hasher.update(path.to_string_lossy().as_bytes());
+    hasher.update(pid.sock.ip().to_string().as_bytes());
+    hasher.update(pid.path.to_string_lossy().as_bytes());
     hasher.finalize()
 }
 
-fn get_makefile_path(makefile: &RemoteMakefile, path: &PathBuf) -> Result<PathBuf> {
-    let hash = format!("{}", hash_socket_path(makefile.sock(), path));
+fn get_makefile_path(pid: &ProcessId) -> Result<PathBuf> {
+    let hash = format!("{}", hash_socket_path(pid));
     let short = &hash.as_bytes()[..16];
     let mut path = init_fs()?;
     path.push(hex::encode(short));
     Ok(path)
 }
 
-pub fn push_makefile(makefile: &RemoteMakefile, path: &PathBuf) -> Result<()> {
-    let path = get_makefile_path(&makefile, path)?;
+pub fn push_makefile(makefile: &RemoteMakefile, pid: &ProcessId) -> Result<()> {
+    let path = get_makefile_path(pid)?;
     write(path, makefile.makefile()).context("Failed to write the Makefile.")
 }

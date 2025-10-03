@@ -1,19 +1,20 @@
 use anyhow::{Context, Result, bail};
 use log::warn;
-use std::{collections::HashSet, path::PathBuf, time::Duration};
+use std::{collections::HashSet, time::Duration};
 use tokio::{net::TcpListener, select, sync::mpsc::channel, time::sleep};
 
 use crate::{
     dec,
     makefile::RemoteMakefile,
     network::{
-        DeamonMessage, MessageKind, get_deamon_address, messages::DistributerMessage,
+        DaemonMessage, Message, MessageKind, get_daemon_sock, messages::DistributerMessage,
         read_next_message, utils::send_message,
     },
+    process_id::ProcessId,
 };
 
-pub async fn distribute(makefiles: Vec<RemoteMakefile>, path: PathBuf) -> Result<()> {
-    let mut caller_sock = get_deamon_address();
+pub async fn distribute(pid: ProcessId, makefiles: Vec<RemoteMakefile>) -> Result<()> {
+    let mut caller_sock = get_daemon_sock();
     caller_sock.set_port(0);
     let listener = TcpListener::bind(caller_sock).await?;
     caller_sock = listener.local_addr()?;
@@ -24,10 +25,14 @@ pub async fn distribute(makefiles: Vec<RemoteMakefile>, path: PathBuf) -> Result
         return Ok(());
     }
 
-    for mut makefile in makefiles {
-        let ip = *makefile.sock();
-        makefile.set_sock(caller_sock);
-        send_message(DeamonMessage::Distribute(makefile, path.clone()), ip).await?;
+    for makefile in makefiles {
+        let sock = *makefile.sock();
+        let message = Message::new(
+            DaemonMessage::Distribute { makefile },
+            pid.clone(),
+            caller_sock,
+        );
+        send_message(message, sock).await?;
     }
 
     let (sender, mut receiver) = channel(host_amount);
@@ -78,7 +83,7 @@ pub async fn distribute(makefiles: Vec<RemoteMakefile>, path: PathBuf) -> Result
                         }
                     };
 
-                    let message: DistributerMessage = match dec!(message) {
+                    let message: Message<DistributerMessage> = match dec!(message) {
                         Ok(msg) => msg,
                         Err(e) => {
                             warn!("Distributer: Failed to decrypt a DistributerMessage: {e}");
@@ -86,7 +91,7 @@ pub async fn distribute(makefiles: Vec<RemoteMakefile>, path: PathBuf) -> Result
                         }
                     };
 
-                    if let Err(e) = sender.send((message, sock)).await {
+                    if let Err(e) = sender.send((message.inner, sock)).await {
                         warn!("Distributer: Failed to notify for the message received from {sock}: {e}");
                     }
                 });

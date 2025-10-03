@@ -1,6 +1,7 @@
-use crate::{
-    lexer::tokens::{Line, Token},
+use crate::lexer::{
+    directive::DIRECTIVE_PREFIX,
     target_label::TargetLabel,
+    tokens::{Line, Token},
 };
 use anyhow::{Context, Result};
 use log::warn;
@@ -19,6 +20,11 @@ pub fn lex(s: String) -> Result<LexingOutput> {
         let mut lines_iter = s.lines();
 
         while let Some(line) = lines_iter.next() {
+            if line.starts_with(DIRECTIVE_PREFIX) {
+                lines.push(Line::Directive(line[2..].to_string()));
+                continue;
+            }
+
             let (mut line, _) = line
                 .split_once('#')
                 .map(|(l, _)| (l.to_string(), ()))
@@ -117,6 +123,7 @@ pub fn lex(s: String) -> Result<LexingOutput> {
                 Some(Line::RawLine(line)) => {
                     warn!("Unexpected RawLine after processing: {}", line);
                 }
+                Some(Line::Directive(dir)) => tokens.push(Token::Directive(dir.parse()?)),
                 None => break,
             }
         }
@@ -128,7 +135,7 @@ pub fn lex(s: String) -> Result<LexingOutput> {
     Ok(tokens)
 }
 
-pub fn lex_from_path(path: String) -> Result<LexingOutput> {
+pub fn lex_from_path(path: &str) -> Result<LexingOutput> {
     let mut f = File::open(&path).context(format!("When opening the file {path}."))?;
     let mut content = String::new();
     f.read_to_string(&mut content)
@@ -141,5 +148,5 @@ pub fn guess_path_and_lex() -> Result<LexingOutput> {
         .iter()
         .find(|path| Path::new(path).try_exists().unwrap_or(false))
         .context(NO_MAKEFILE_FOUND)?;
-    lex_from_path(path.to_string())
+    lex_from_path(path)
 }

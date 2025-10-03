@@ -5,8 +5,8 @@ use tokio::{net::TcpListener, task::spawn};
 use crate::{
     dec,
     network::{
-        MessageKind, fetch_handler::handle_fetch, fs::init_fs, get_deamon_address,
-        makefile_receiver::receiv_makefile, messages::DeamonMessage, new_process::new_process,
+        Message, MessageKind, fetch_handler::handle_fetch, fs::init_fs, get_daemon_sock,
+        makefile_receiver::receiv_makefile, messages::DaemonMessage, new_process::new_process,
         utils::read_next_message,
     },
 };
@@ -14,9 +14,9 @@ use crate::{
 pub async fn start() -> Result<()> {
     init_fs()?;
 
-    let listener = TcpListener::bind(get_deamon_address())
+    let listener = TcpListener::bind(get_daemon_sock())
         .await
-        .context("When starting the deamon.")?;
+        .context("When starting the daemon.")?;
 
     loop {
         let (mut tcp_stream, _) = match listener.accept().await {
@@ -27,7 +27,7 @@ pub async fn start() -> Result<()> {
         spawn(async move {
             loop {
                 let message =
-                    match read_next_message(&mut tcp_stream, MessageKind::DeamonMessage).await {
+                    match read_next_message(&mut tcp_stream, MessageKind::DaemonMessage).await {
                         Ok(Some(msg)) => msg,
                         Ok(None) => break,
                         Err(e) => {
@@ -35,26 +35,28 @@ pub async fn start() -> Result<()> {
                             break;
                         }
                     };
-                let message: DeamonMessage = match dec!(message) {
+                let message: Message<DaemonMessage> = match dec!(message) {
                     Ok(msg) => msg,
                     _ => {
-                        warn!("Failed to decrypt DeamonMessage.");
+                        warn!("Failed to decrypt DaemonMessage.");
                         break;
                     }
                 };
 
                 spawn(async move {
-                    match message {
-                        DeamonMessage::NewProcess {
-                            makefiles,
-                            caller_addr,
-                            entry_makefile_dir,
-                            args,
-                        } => new_process(makefiles, caller_addr, entry_makefile_dir, args).await,
-                        DeamonMessage::Distribute(makefile, path) => {
-                            receiv_makefile(makefile, path).await
+                    let pid = message.pid;
+                    let client = message.client;
+                    match message.inner {
+                        DaemonMessage::NewProcess { makefiles, args } => {
+                            new_process(pid, client, makefiles, args).await
                         }
-                        DeamonMessage::Fetch { target, sock } => handle_fetch(target, sock).await,
+                        DaemonMessage::Distribute { makefile } => {
+                            receiv_makefile(pid, client, makefile).await
+                        }
+                        DaemonMessage::Fetch {
+                            target,
+                            labeled_path,
+                        } => handle_fetch(pid, client, target, labeled_path).await,
                     }
                 });
             }

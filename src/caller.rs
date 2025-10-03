@@ -1,6 +1,8 @@
 use std::{env::current_dir, fs::write, time::Duration};
 
-use crate::{lexer::guess_path_and_lex, makefile::RemoteMakefileSet, network::DEFAULT_SOCK};
+use crate::{
+    lexer::guess_path_and_lex, makefile::RemoteMakefileSet, network::Message, process_id::ProcessId,
+};
 use anyhow::{Context, Result};
 use log::warn;
 use tokio::{net::TcpListener, time::timeout};
@@ -8,17 +10,18 @@ use tokio::{net::TcpListener, time::timeout};
 use crate::{
     dec,
     network::{
-        DeamonMessage, MessageKind, ProcessMessage, contact_deamon_or_start_it, get_deamon_address,
+        DaemonMessage, MessageKind, ProcessMessage, contact_daemon_or_start_it, get_daemon_sock,
         read_next_message,
     },
 };
+
 const TMP_MAKEFILE_NAME: &'static str = "dake_tmp_makefile";
 
 pub async fn make(mut args: Vec<String>) -> Result<()> {
     let caller_dir = current_dir()?;
-    let caller_sock = DEFAULT_SOCK;
     let tokens = guess_path_and_lex()?;
-    let makefiles = RemoteMakefileSet::generate(tokens, caller_dir.clone(), caller_sock);
+    let makefiles = RemoteMakefileSet::generate(tokens, caller_dir.clone(), get_daemon_sock());
+    let daemon_sock = get_daemon_sock();
 
     write(TMP_MAKEFILE_NAME, makefiles.my_makefile())?;
 
@@ -34,26 +37,28 @@ pub async fn make(mut args: Vec<String>) -> Result<()> {
         .local_addr()
         .context("When requesting the caller socket address")?;
 
-    let message = DeamonMessage::NewProcess {
-        makefiles: makefiles.drop_makefiles(),
+    let message = Message::new(
+        DaemonMessage::NewProcess {
+            makefiles: makefiles.drop_makefiles(),
+            args,
+        },
+        ProcessId::new(daemon_sock, caller_dir),
         caller_addr,
-        args,
-        entry_makefile_dir: caller_dir,
-    };
+    );
 
-    contact_deamon_or_start_it(message).await?;
+    contact_daemon_or_start_it(message).await?;
 
     let timer = timeout(Duration::from_secs(1), async move {
-        let deamon_addr = get_deamon_address().ip();
+        let daemon_addr = daemon_sock.ip();
         loop {
             match listener.accept().await {
                 Ok((tcp_stream, addr)) => {
                     let ip = addr.ip();
-                    if ip == deamon_addr {
+                    if ip == daemon_addr {
                         break tcp_stream;
                     } else {
                         warn!(
-                            "The caller should only receiv messages from the deamon. Was waiting for {deamon_addr}, received {ip}."
+                            "The caller should only receiv messages from the daemon. Was waiting for {daemon_addr}, received {ip}."
                         );
                     }
                 }
@@ -88,7 +93,7 @@ pub async fn make(mut args: Vec<String>) -> Result<()> {
             }
         }
     } else {
-        warn!("The deamon is not responding.")
+        warn!("The daemon is not responding.")
     }
     Ok(())
 }

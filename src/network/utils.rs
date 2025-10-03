@@ -1,8 +1,4 @@
-use std::{
-    net::{IpAddr, SocketAddr},
-    process::Command,
-    time::Duration,
-};
+use std::{net::SocketAddr, process::Command, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use tokio::{
@@ -15,24 +11,12 @@ use tokio::{
 use crate::{
     dec, enc,
     network::{
-        DEFAULT_ADDR, DEFAULT_PORT, MessageKind,
-        messages::{Message, MessageHeader},
+        DEFAULT_SOCK, MessageKind,
+        messages::{Message, MessageHeader, MessageTrait},
     },
 };
 
-pub fn parse_raw_ip(raw_ip: &str) -> Result<SocketAddr> {
-    Ok(match raw_ip.parse() {
-        Ok(sa) => sa,
-        Err(_) => {
-            let ip: IpAddr = raw_ip
-                .parse()
-                .with_context(|| format!("Invalid IP string: {raw_ip}"))?;
-            SocketAddr::new(ip, DEFAULT_PORT)
-        }
-    })
-}
-
-pub async fn send_message<M: Message>(msg: M, sock: SocketAddr) -> Result<()> {
+pub async fn send_message<M: MessageTrait>(msg: Message<M>, sock: SocketAddr) -> Result<()> {
     let mut stream = TcpStream::connect(sock)
         .await
         .context("When connecting on the stream.")?;
@@ -44,36 +28,36 @@ pub async fn send_message<M: Message>(msg: M, sock: SocketAddr) -> Result<()> {
     Ok(())
 }
 
-pub fn get_deamon_address() -> SocketAddr {
-    SocketAddr::new(DEFAULT_ADDR, DEFAULT_PORT)
+pub fn get_daemon_sock() -> SocketAddr {
+    DEFAULT_SOCK
 }
 
-pub async fn contact_deamon<M: Message>(msg: M) -> Result<()> {
-    let sock = get_deamon_address();
+pub async fn contact_daemon<M: MessageTrait>(msg: Message<M>) -> Result<()> {
+    let sock = get_daemon_sock();
     send_message(msg, sock)
         .await
-        .context("When contacting deamon.")
+        .context("When contacting daemon.")
 }
 
-pub async fn contact_deamon_or_start_it<M: Message + 'static>(msg: M) -> Result<()> {
-    if let Err(e) = contact_deamon(msg.clone()).await {
+pub async fn contact_daemon_or_start_it<M: MessageTrait + 'static>(msg: Message<M>) -> Result<()> {
+    if let Err(e) = contact_daemon(msg.clone()).await {
         for cause in e.chain() {
             if let Some(e) = cause.downcast_ref::<tokio::io::Error>() {
                 if matches!(e.kind(), ErrorKind::ConnectionRefused) {
                     Command::new("target/debug/dake")
-                        .arg("deamon")
+                        .arg("daemon")
                         .spawn()
-                        .context("Failed to spawn the deamon.")?;
+                        .context("Failed to spawn the daemon.")?;
 
                     let cloned_msg = msg.clone();
                     let message_sending =
-                        spawn(async move { while contact_deamon(msg.clone()).await.is_err() {} });
+                        spawn(async move { while contact_daemon(msg.clone()).await.is_err() {} });
                     return match timeout(Duration::from_secs(1), message_sending).await {
                         Ok(_) => Ok(()),
-                        Err(_) => match contact_deamon(cloned_msg).await {
+                        Err(_) => match contact_daemon(cloned_msg).await {
                             Ok(_) => Ok(()),
                             Err(e) => bail!(
-                                "We failed to send the message to the deamon after starting it: {e}"
+                                "We failed to send the message to the daemon after starting it: {e}"
                             ),
                         },
                     };

@@ -16,6 +16,6 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 pub use {
     distribute::distribute,
     listen::start,
-    messages::{DeamonMessage, FetcherMessage, MessageKind, ProcessMessage},
-    utils::{contact_deamon_or_start_it, get_deamon_address, read_next_message, send_message},
+    messages::{DaemonMessage, FetcherMessage, Message, MessageKind, ProcessMessage},
+    utils::{contact_daemon_or_start_it, get_daemon_sock, read_next_message, send_message},
 };

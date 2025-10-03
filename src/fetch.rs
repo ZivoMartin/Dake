@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result};
 use log::warn;
@@ -6,12 +6,19 @@ use tokio::{net::TcpListener, select, time::sleep};
 
 use crate::{
     dec,
-    network::{DeamonMessage, FetcherMessage, MessageKind, read_next_message, send_message},
-    target_label::TargetLabel,
+    network::{
+        DaemonMessage, FetcherMessage, Message, MessageKind, read_next_message, send_message,
+    },
+    process_id::ProcessId,
 };
 
-pub async fn fetch(label: TargetLabel, target: String) -> Result<()> {
-    let sock = label.sock;
+pub async fn fetch(
+    target: String,
+    labeled_path: Option<PathBuf>,
+    caller_path: PathBuf,
+    sock: SocketAddr,
+) -> Result<()> {
+    let pid = ProcessId::new(sock, caller_path);
 
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -20,10 +27,14 @@ pub async fn fetch(label: TargetLabel, target: String) -> Result<()> {
         .local_addr()
         .context("When requesting the fetcher socket address")?;
 
-    let message = DeamonMessage::Fetch {
-        target,
-        sock: fetcher_addr,
-    };
+    let message = Message::new(
+        DaemonMessage::Fetch {
+            target,
+            labeled_path,
+        },
+        pid.clone(),
+        fetcher_addr,
+    );
 
     send_message(message, sock).await?;
 
@@ -34,7 +45,7 @@ pub async fn fetch(label: TargetLabel, target: String) -> Result<()> {
                     tcp_stream
                 } else {
                     warn!(
-                        "The fetcher should only receiv messages from the specified remote deamon. Was waiting for {sock}, received {remote_sock}."
+                        "The fetcher should only receive messages from the specified remote deamon. Was waiting for {sock}, received {remote_sock}."
                     );
                     continue;
                 }

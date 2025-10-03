@@ -2,9 +2,9 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{enc, makefile::RemoteMakefile};
+use crate::{enc, makefile::RemoteMakefile, process_id::ProcessId};
 
-pub trait Message: Clone + Serialize + for<'a> Deserialize<'a> + Send {
+pub trait MessageTrait: Clone + Serialize + Send {
     fn get_kind(&self) -> MessageKind;
 }
 
@@ -17,7 +17,7 @@ pub struct MessageHeader {
 #[derive(Serialize, Deserialize, Default, Eq, PartialEq)]
 pub enum MessageKind {
     #[default]
-    DeamonMessage,
+    DaemonMessage,
     ProcessMessage,
     DistributerMessage,
     FetcherMessage,
@@ -41,23 +41,40 @@ impl MessageHeader {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub enum DeamonMessage {
+pub struct Message<M: MessageTrait> {
+    pub inner: M,
+    pub pid: ProcessId,
+    pub client: SocketAddr,
+}
+
+impl<M: MessageTrait> Message<M> {
+    pub fn new(inner: M, pid: ProcessId, client: SocketAddr) -> Self {
+        Self { inner, pid, client }
+    }
+
+    pub fn get_kind(&self) -> MessageKind {
+        self.inner.get_kind()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum DaemonMessage {
     NewProcess {
         makefiles: Vec<RemoteMakefile>,
-        caller_addr: SocketAddr,
-        entry_makefile_dir: PathBuf,
         args: Vec<String>,
     },
-    Distribute(RemoteMakefile, PathBuf),
+    Distribute {
+        makefile: RemoteMakefile,
+    },
     Fetch {
         target: String,
-        sock: SocketAddr,
+        labeled_path: Option<PathBuf>,
     },
 }
 
-impl Message for DeamonMessage {
+impl MessageTrait for DaemonMessage {
     fn get_kind(&self) -> MessageKind {
-        MessageKind::DeamonMessage
+        MessageKind::DaemonMessage
     }
 }
 
@@ -66,7 +83,7 @@ pub enum ProcessMessage {
     End,
 }
 
-impl Message for ProcessMessage {
+impl MessageTrait for ProcessMessage {
     fn get_kind(&self) -> MessageKind {
         MessageKind::ProcessMessage
     }
@@ -78,7 +95,7 @@ pub enum DistributerMessage {
     Failed,
 }
 
-impl Message for DistributerMessage {
+impl MessageTrait for DistributerMessage {
     fn get_kind(&self) -> MessageKind {
         MessageKind::DistributerMessage
     }
@@ -89,7 +106,7 @@ pub enum FetcherMessage {
     Object(Vec<u8>),
 }
 
-impl Message for FetcherMessage {
+impl MessageTrait for FetcherMessage {
     fn get_kind(&self) -> MessageKind {
         MessageKind::FetcherMessage
     }
