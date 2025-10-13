@@ -11,11 +11,15 @@
 //! The CLI also ensures logging is initialized and provides help output if no
 //! command is supplied.
 
-use std::{net::SocketAddr, path::PathBuf};
+use std::{
+    net::SocketAddr,
+    path::PathBuf,
+    process::{ExitCode, exit},
+};
 
 use clap::{CommandFactory, Parser, Subcommand};
 use dake::{caller, fetch, network};
-use log::{info, warn};
+use tracing::info;
 
 /// CLI root structure used by `clap` for parsing arguments.
 #[derive(Parser, Debug)]
@@ -55,23 +59,16 @@ enum Commands {
 
 /// Entry point of the application.
 ///
-/// Initializes logging, parses CLI arguments, and dispatches execution
+/// Parses CLI arguments, and dispatches execution
 /// to the relevant Dake subsystem (`fetch`, `daemon`, or `caller`).
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Initialize the logger
-    if let Err(e) = simple_logger::init() {
-        eprintln!("Failed to init the logger, no log/warn messages will be printed: {e}");
-    } else {
-        info!("Logger successfully initialized");
-    }
-
+async fn main() -> anyhow::Result<ExitCode> {
     // Parse command-line arguments
     let cli = Cli::parse();
     info!("Parsed CLI arguments: {:?}", cli);
 
     // Match on subcommand and execute the corresponding logic
-    match cli.command {
+    let exit_code = match cli.command {
         Some(Commands::Fetch {
             target,
             caller_path,
@@ -81,25 +78,28 @@ async fn main() -> anyhow::Result<()> {
             info!("Executing Fetch command for target '{target}' with socket {sock}");
             fetch::fetch(target, labeled_path, caller_path, sock).await?;
             info!("Fetch command completed successfully");
+            0
         }
 
         Some(Commands::Daemon) => {
             info!("Starting daemon...");
             network::start().await?;
             info!("Daemon terminated normally");
+            0
         }
 
         Some(Commands::Caller(args)) => {
             info!("Executing Caller command with args: {:?}", args);
-            caller::make(args).await?;
+            let exit_code = caller::make(args).await?;
             info!("Caller command completed successfully");
+            exit_code
         }
 
         None => {
             Cli::command().print_help()?;
+            1
         }
-    }
-
+    };
     info!("Dake CLI execution finished");
-    Ok(())
+    exit(exit_code as i32)
 }

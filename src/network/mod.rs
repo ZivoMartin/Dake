@@ -1,10 +1,10 @@
-mod distribute;
-mod fetch_handler;
 mod fs;
+mod handlers;
 mod listen;
-mod makefile_receiver;
+mod message_ctx;
 mod messages;
-mod new_process;
+mod process_datas;
+mod state;
 mod utils;
 
 pub const DEFAULT_PORT: u16 = 1808;
@@ -14,7 +14,7 @@ pub const DEFAULT_SOCK: SocketAddr = SocketAddr::new(DEFAULT_ADDR, DEFAULT_PORT)
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 pub use {
-    distribute::distribute,
+    handlers::distribute,
     listen::start,
     messages::{DaemonMessage, FetcherMessage, Message, MessageKind, ProcessMessage},
     utils::{contact_daemon_or_start_it, get_daemon_sock, read_next_message, send_message},

@@ -1,37 +1,74 @@
+//! # Messages Module
+//!
+//! This module defines the **message protocol** used in the Dake distributed
+//! build system.  
+//!
+//! Messages are serialized with `bincode` and transmitted across TCP sockets
+//! between the daemon, caller, distributor, and fetcher components.
+
 use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{enc, makefile::RemoteMakefile, process_id::ProcessId};
+use crate::{
+    enc, makefile::RemoteMakefile, network::process_datas::ProcessDatas, process_id::ProcessId,
+};
 
+/// A trait implemented by all message types.
+///
+/// Defines how to retrieve the corresponding [`MessageKind`].
 pub trait MessageTrait: Clone + Serialize + Send {
+    /// Returns the [`MessageKind`] associated with this message.
     fn get_kind(&self) -> MessageKind;
 }
 
-#[derive(Serialize, Deserialize, Default)]
+/// Header prepended to every serialized message.
+///
+/// Contains:
+/// - `size`: Length of the serialized payload (in bytes)
+/// - `kind`: The [`MessageKind`] of the message
+#[derive(Serialize, Deserialize, Default, Debug)]
 pub struct MessageHeader {
+    /// Size of the message payload in bytes.
     pub size: u64,
+
+    /// The kind of the message (daemon, process, etc.).
     pub kind: MessageKind,
 }
 
-#[derive(Serialize, Deserialize, Default, Eq, PartialEq)]
+/// Discriminator for all supported message categories.
+#[derive(Serialize, Deserialize, Default, Eq, PartialEq, Debug)]
 pub enum MessageKind {
+    /// Message coming from or for the daemon.
     #[default]
     DaemonMessage,
+
+    /// Message related to process lifecycle.
     ProcessMessage,
+
+    /// Message used during distribution of makefiles.
     DistributerMessage,
+
+    /// Message used by fetcher logic to transfer build objects.
     FetcherMessage,
 }
 
 impl MessageHeader {
+    /// Creates a new [`MessageHeader`].
     pub fn new(size: u64, kind: MessageKind) -> Self {
         Self { size, kind }
     }
 
+    /// Returns the serialized length of a default message header.
     pub fn get_header_length() -> usize {
         enc!(MessageHeader::default()).len()
     }
 
+    /// Prepends a serialized header to a message payload.
+    ///
+    /// # Arguments
+    /// * `msg` - The serialized payload.
+    /// * `kind` - The message kind for this payload.
     pub fn wrap(mut msg: Vec<u8>, kind: MessageKind) -> Vec<u8> {
         let header = MessageHeader::new(msg.len() as u64, kind);
         let mut header = enc!(header);
@@ -40,36 +77,80 @@ impl MessageHeader {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+/// A generic message wrapper sent across the network.
+///
+/// Each message contains:
+/// - `inner`: The actual message payload (implements [`MessageTrait`])
+/// - `pid`: The [`ProcessId`] of the sender
+/// - `client`: The socket of the sender
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Message<M: MessageTrait> {
+    /// The actual message payload.
     pub inner: M,
+
+    /// The process identifier of the sender.
     pub pid: ProcessId,
+
+    /// The client socket associated with this message.
     pub client: SocketAddr,
 }
 
 impl<M: MessageTrait> Message<M> {
+    /// Constructs a new [`Message`] with the given payload, process, and client.
     pub fn new(inner: M, pid: ProcessId, client: SocketAddr) -> Self {
         Self { inner, pid, client }
     }
 
+    /// Returns the [`MessageKind`] of the contained payload.
     pub fn get_kind(&self) -> MessageKind {
         self.inner.get_kind()
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+/// Messages exchanged with the daemon.
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum DaemonMessage {
+    /// Request to start a new process with given makefiles and arguments.
     NewProcess {
+        /// Remote makefiles to distribute.
         makefiles: Vec<RemoteMakefile>,
+
+        /// Arguments to forward to `make`.
         args: Vec<String>,
     },
-    Distribute {
+
+    /// Request to distribute a single makefile to a remote host.
+    NewMakefile {
+        /// The remote makefile.
         makefile: RemoteMakefile,
+
+        /// The process datas for the build process of the makefile.
+        process_datas: ProcessDatas,
     },
+
+    /// Request to fetch a target from a remote host.
     Fetch {
+        /// The build target to fetch.
         target: String,
+
+        /// An optional labeled path for fetching.
         labeled_path: Option<PathBuf>,
     },
+
+    /// Submit a new log to forward to the caller on stdout
+    StdoutLog { log: String },
+
+    /// Submit a new log to forward to the caller on stderr
+    StderrLog { log: String },
+
+    /// Indicates that one of the make failed.
+    MakeError {
+        guilty_node: SocketAddr,
+        exit_code: u32,
+    },
+
+    /// Indicate that the
+    Done,
 }
 
 impl MessageTrait for DaemonMessage {
@@ -78,9 +159,15 @@ impl MessageTrait for DaemonMessage {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+/// Messages related to process lifecycle.
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum ProcessMessage {
-    End,
+    /// Log form the remote make processes on stdout.
+    StdoutLog { log: String },
+    /// Log form the remote make processes on stderr.
+    StderrLog { log: String },
+    /// Indicates that the process has finished execution.
+    End { exit_code: u32 },
 }
 
 impl MessageTrait for ProcessMessage {
@@ -89,9 +176,13 @@ impl MessageTrait for ProcessMessage {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+/// Acknowledgment or failure messages used by the distributor.
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum DistributerMessage {
+    /// The makefile was successfully received.
     Ack,
+
+    /// The makefile distribution failed.
     Failed,
 }
 
@@ -101,9 +192,17 @@ impl MessageTrait for DistributerMessage {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+/// Messages used by the fetcher to transfer objects or build artifacts.
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum FetcherMessage {
+    /// Encapsulates a build object (binary data).
     Object(Vec<u8>),
+    OpenFailed,
+    IsFolder,
+    FileMissing,
+    MakeFailed,
+    PathResolutionFailed,
+    ReadFailed,
 }
 
 impl MessageTrait for FetcherMessage {

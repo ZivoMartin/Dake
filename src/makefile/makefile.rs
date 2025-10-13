@@ -3,7 +3,7 @@ use std::net::{IpAddr, SocketAddr};
 use derive_getters::Getters;
 use serde::{Deserialize, Serialize};
 
-#[derive(Getters, Clone, Serialize, Deserialize)]
+#[derive(Getters, Clone, Serialize, Deserialize, Debug)]
 pub struct RemoteMakefile {
     makefile: String,
     sock: SocketAddr,
