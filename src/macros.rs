@@ -6,13 +6,7 @@ macro_rules! dec {
 #[macro_export]
 macro_rules! enc {
     ($var:expr) => {
-        bincode::serialize(&$var).unwrap()
-    };
-    ($var:expr, $bytes:expr) => {
-        match bincode::serialize(&$var) {
-            Ok(mut serialized) => $bytes.append(&mut serialized),
-            Err(e) => panic!("Serialization error: {:?}", e),
-        }
+        bincode::serialize(&$var)
     };
 }
 

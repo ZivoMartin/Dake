@@ -17,10 +17,11 @@
 use crate::{
     lexer::{Directive, TargetLabel, Token},
     makefile::{RemoteMakefile, RemoteMakefileSet},
+    process_id::ProcessId,
 };
 use std::{
     collections::{HashMap, HashSet},
-    net::{IpAddr, SocketAddr},
+    net::IpAddr,
     path::PathBuf,
 };
 use tracing::{info, warn};
@@ -30,8 +31,7 @@ impl RemoteMakefileSet {
     ///
     /// # Arguments
     /// * `tokens` - The list of tokens parsed from a Makefile.
-    /// * `caller_dir` - The local working directory of the caller.
-    /// * `caller_sock` - The socket of the caller.
+    /// * `pid` - The process id.
     ///
     /// # Behavior
     /// - Raw text (`Token::RawText`) is appended to all makefiles.
@@ -44,16 +44,16 @@ impl RemoteMakefileSet {
     ///
     /// # Returns
     /// A new [`RemoteMakefileSet`] containing the distributed makefiles.
-    pub fn generate(tokens: Vec<Token>, caller_dir: PathBuf, caller_sock: SocketAddr) -> Self {
+    pub fn generate(tokens: Vec<Token>, pid: ProcessId) -> Self {
         info!(
             "RemoteMakefileSet: Starting generation with {} tokens",
             tokens.len()
         );
 
         let mut full_fetch_makefile = String::new();
-        let mut saw_ips = HashSet::from([caller_sock.ip()]);
-        let mut makefiles = vec![RemoteMakefile::new(String::new(), caller_sock)];
-        let mut root_path_set = HashMap::from([(caller_sock.ip(), caller_dir.clone())]);
+        let mut saw_ips = HashSet::from([pid.ip()]);
+        let mut makefiles = vec![RemoteMakefile::new(String::new(), pid.sock())];
+        let mut root_path_set = HashMap::from([(pid.ip(), pid.path().clone())]);
 
         // Utility closure to construct fetch commands
         let get_fetch_command = |root_path_set: &HashMap<IpAddr, PathBuf>,
@@ -68,8 +68,9 @@ impl RemoteMakefileSet {
                 },
             };
             format!(
-                "target/debug/dake fetch \"{}\" {} {path} \"{target}\"\n",
-                caller_dir.display(),
+                "target/debug/dake fetch \"{:?}\" {} {} {path} \"{target}\"\n",
+                pid.path(),
+                pid.id(),
                 label.sock
             )
         };
@@ -91,7 +92,7 @@ impl RemoteMakefileSet {
                     label,
                     command,
                 } => {
-                    let label = label.unwrap_or_else(|| TargetLabel::new(caller_sock, None));
+                    let label = label.unwrap_or_else(|| TargetLabel::new(pid.sock(), None));
                     info!(
                         "RemoteMakefileSet: Processing target '{}' for label {:?}",
                         target, label

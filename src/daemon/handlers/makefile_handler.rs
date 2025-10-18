@@ -1,20 +1,12 @@
-//! # Makefile Receiver
-//!
-//! This module handles receiving remote makefiles sent during distribution.  
-//!
-//! Responsibilities:
-//! - Persist the received makefile to the filesystem via [`push_makefile`].
-//! - Acknowledge the distributor with a [`DistributerMessage::Ack`] on success.
-//! - Notify failure with a [`DistributerMessage::Failed`] if writing fails.
-
 use tracing::{error, info, warn};
 
 use crate::{
-    makefile::RemoteMakefile,
-    network::{
-        Message, fs::push_makefile, message_ctx::MessageCtx, messages::DistributerMessage,
-        process_datas::ProcessDatas, utils::send_message,
+    daemon::{
+        communication::{AckMessage, Message, MessageCtx, send_message},
+        fs::push_makefile,
+        process_datas::ProcessDatas,
     },
+    makefile::RemoteMakefile,
 };
 
 /// Receives a remote makefile, writes it to disk, and replies with an acknowledgment.
@@ -32,7 +24,7 @@ pub async fn receiv_makefile(
     let message = |inner| Message::new(inner, pid.clone(), client);
 
     // Registering the new makefile in the shared database
-    state.register_process(pid.clone(), process_datas);
+    state.register_process(pid.clone(), process_datas).await;
 
     // Attempt to persist makefile
     match push_makefile(&makefile, &pid) {
@@ -41,7 +33,7 @@ pub async fn receiv_makefile(
                 "Receiver: Successfully persisted makefile for pid {:?}, sending Ack to {}",
                 pid, client
             );
-            if let Err(e) = send_message(message(DistributerMessage::Ack), client).await {
+            if let Err(e) = send_message(message(AckMessage::Ok), client).await {
                 warn!(
                     "Receiver: Failed to send Ack to distributor {} for pid {:?}: {e}",
                     client, pid
@@ -55,7 +47,7 @@ pub async fn receiv_makefile(
                 "Receiver: Failed to persist makefile for pid {:?}: {e}",
                 pid
             );
-            if let Err(e) = send_message(message(DistributerMessage::Failed), client).await {
+            if let Err(e) = send_message(message(AckMessage::Failure), client).await {
                 warn!(
                     "Receiver: Failed to send Fail message to distributor {} for pid {:?}: {e}",
                     client, pid

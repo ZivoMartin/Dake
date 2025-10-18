@@ -18,7 +18,7 @@ use std::{
 };
 
 use clap::{CommandFactory, Parser, Subcommand};
-use dake::{caller, fetch, network};
+use dake::{caller, daemon, fetch};
 use tracing::info;
 
 /// CLI root structure used by `clap` for parsing arguments.
@@ -37,6 +37,9 @@ enum Commands {
     Fetch {
         /// Path of the caller working directory
         caller_path: PathBuf,
+
+        /// Id of the process used in the pid
+        id: u64,
 
         /// Remote daemon socket to fetch from
         sock: SocketAddr,
@@ -72,18 +75,19 @@ async fn main() -> anyhow::Result<ExitCode> {
         Some(Commands::Fetch {
             target,
             caller_path,
+            id,
             labeled_path,
             sock,
         }) => {
             info!("Executing Fetch command for target '{target}' with socket {sock}");
-            fetch::fetch(target, labeled_path, caller_path, sock).await?;
+            fetch::fetch(target, labeled_path, caller_path, id, sock).await?;
             info!("Fetch command completed successfully");
             0
         }
 
         Some(Commands::Daemon) => {
             info!("Starting daemon...");
-            network::start().await?;
+            daemon::start().await?;
             info!("Daemon terminated normally");
             0
         }
@@ -101,5 +105,5 @@ async fn main() -> anyhow::Result<ExitCode> {
         }
     };
     info!("Dake CLI execution finished");
-    exit(exit_code as i32)
+    exit(exit_code)
 }

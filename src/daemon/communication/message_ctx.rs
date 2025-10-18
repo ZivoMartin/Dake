@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use crate::{network::state::State, process_id::ProcessId};
+use crate::{daemon::state::State, process_id::ProcessId};
 
 #[derive(Clone)]
 pub struct MessageCtx {

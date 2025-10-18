@@ -5,10 +5,7 @@
 //! The daemon is responsible for:
 //! - Accepting incoming TCP connections on the daemon socket.
 //! - Reading and deserializing [`DaemonMessage`]s sent by callers or distributors.
-//! - Dispatching requests to the appropriate handler:
-//!   - [`new_process`] for starting a new build process
-//!   - [`receiv_makefile`] for receiving and storing distributed makefiles
-//!   - [`handle_fetch`] for handling fetch requests (artifacts)
+//! - Dispatching requests to the appropriate handler
 //!
 //! The daemon runs indefinitely, spawning tasks to handle each connection
 //! asynchronously.
@@ -18,19 +15,18 @@ use tokio::{net::TcpListener, task::spawn};
 use tracing::{info, warn};
 
 use crate::{
-    dec,
-    network::{
-        Message, MessageKind,
-        fs::init_fs,
-        get_daemon_sock,
-        handlers::{
-            OutputFile, handle_error, handle_fetch, handle_log, new_process, receiv_makefile,
+    daemon::{
+        communication::{
+            DaemonMessage, Message, MessageCtx, MessageKind, get_daemon_sock, read_next_message,
         },
-        message_ctx::MessageCtx,
-        messages::DaemonMessage,
+        fs::init_fs,
+        handlers::{
+            OutputFile, handle_done, handle_error, handle_fetch, handle_fresh_request, handle_log,
+            new_process, receiv_makefile,
+        },
         state::State,
-        utils::read_next_message,
     },
+    dec,
 };
 
 /// Starts the daemon listener.
@@ -101,6 +97,23 @@ pub async fn start() -> Result<()> {
                     }
                 };
 
+                match state.process_is_registered(&message.pid).await {
+                    Ok(true) => info!("Process {:?} is indeed registered.", message.pid),
+                    Ok(false) => {
+                        info!(
+                            "We received a late message for process {:?}, this is ok but we ignore.",
+                            message.pid
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        warn!(
+                            "We failed to fetch registeration informations from the state due to {e:?}, ignoring the message, the message has to be ignored."
+                        );
+                        continue;
+                    }
+                }
+
                 // Spawn another task for handling the specific message
                 let state = state.clone();
                 spawn(async move {
@@ -152,7 +165,8 @@ pub async fn start() -> Result<()> {
                             );
                             handle_error(ctx, guilty_node, exit_code).await
                         }
-                        DaemonMessage::Done => todo!(),
+                        DaemonMessage::Done => handle_done(ctx).await,
+                        DaemonMessage::FreshId => handle_fresh_request(ctx).await,
                     }
                 });
             }

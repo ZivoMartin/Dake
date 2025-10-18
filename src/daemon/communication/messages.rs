@@ -8,10 +8,11 @@
 
 use std::{net::SocketAddr, path::PathBuf};
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    enc, makefile::RemoteMakefile, network::process_datas::ProcessDatas, process_id::ProcessId,
+    daemon::process_datas::ProcessDatas, enc, makefile::RemoteMakefile, process_id::ProcessId,
 };
 
 /// A trait implemented by all message types.
@@ -37,7 +38,7 @@ pub struct MessageHeader {
 }
 
 /// Discriminator for all supported message categories.
-#[derive(Serialize, Deserialize, Default, Eq, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Default, Eq, PartialEq, Debug, Copy, Clone)]
 pub enum MessageKind {
     /// Message coming from or for the daemon.
     #[default]
@@ -47,7 +48,7 @@ pub enum MessageKind {
     ProcessMessage,
 
     /// Message used during distribution of makefiles.
-    DistributerMessage,
+    AckMessage,
 
     /// Message used by fetcher logic to transfer build objects.
     FetcherMessage,
@@ -60,8 +61,8 @@ impl MessageHeader {
     }
 
     /// Returns the serialized length of a default message header.
-    pub fn get_header_length() -> usize {
-        enc!(MessageHeader::default()).len()
+    pub fn get_header_length() -> Result<usize> {
+        Ok(enc!(MessageHeader::default())?.len())
     }
 
     /// Prepends a serialized header to a message payload.
@@ -69,11 +70,11 @@ impl MessageHeader {
     /// # Arguments
     /// * `msg` - The serialized payload.
     /// * `kind` - The message kind for this payload.
-    pub fn wrap(mut msg: Vec<u8>, kind: MessageKind) -> Vec<u8> {
+    pub fn wrap(mut msg: Vec<u8>, kind: MessageKind) -> Result<Vec<u8>> {
         let header = MessageHeader::new(msg.len() as u64, kind);
-        let mut header = enc!(header);
+        let mut header = enc!(header)?;
         header.append(&mut msg);
-        header
+        Ok(header)
     }
 }
 
@@ -110,6 +111,10 @@ impl<M: MessageTrait> Message<M> {
 /// Messages exchanged with the daemon.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum DaemonMessage {
+    /// Request for a fresh ProcessId for the given project.
+    /// The process id contains a valid project id but a default process id.
+    FreshId,
+
     /// Request to start a new process with given makefiles and arguments.
     NewProcess {
         /// Remote makefiles to distribute.
@@ -146,10 +151,10 @@ pub enum DaemonMessage {
     /// Indicates that one of the make failed.
     MakeError {
         guilty_node: SocketAddr,
-        exit_code: u32,
+        exit_code: i32,
     },
 
-    /// Indicate that the
+    /// Indicate that the process is done
     Done,
 }
 
@@ -162,12 +167,14 @@ impl MessageTrait for DaemonMessage {
 /// Messages related to process lifecycle.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum ProcessMessage {
+    /// Response of the daemon, the pid of the message is the fresh pid.
+    FreshId,
     /// Log form the remote make processes on stdout.
     StdoutLog { log: String },
     /// Log form the remote make processes on stderr.
     StderrLog { log: String },
     /// Indicates that the process has finished execution.
-    End { exit_code: u32 },
+    End { exit_code: i32 },
 }
 
 impl MessageTrait for ProcessMessage {
@@ -176,19 +183,19 @@ impl MessageTrait for ProcessMessage {
     }
 }
 
-/// Acknowledgment or failure messages used by the distributor.
+/// Acknowledgment or failure messages
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub enum DistributerMessage {
+pub enum AckMessage {
     /// The makefile was successfully received.
-    Ack,
+    Ok,
 
     /// The makefile distribution failed.
-    Failed,
+    Failure,
 }
 
-impl MessageTrait for DistributerMessage {
+impl MessageTrait for AckMessage {
     fn get_kind(&self) -> MessageKind {
-        MessageKind::DistributerMessage
+        MessageKind::AckMessage
     }
 }
 
@@ -197,12 +204,8 @@ impl MessageTrait for DistributerMessage {
 pub enum FetcherMessage {
     /// Encapsulates a build object (binary data).
     Object(Vec<u8>),
-    OpenFailed,
-    IsFolder,
-    FileMissing,
-    MakeFailed,
-    PathResolutionFailed,
-    ReadFailed,
+    /// Indicated that the fetch failed
+    Failed,
 }
 
 impl MessageTrait for FetcherMessage {

@@ -24,11 +24,11 @@ use tokio::{
 use tracing::{error, info, warn};
 
 use crate::{
-    dec, enc,
-    network::{
-        DEFAULT_SOCK, MessageKind,
-        messages::{Message, MessageHeader, MessageTrait},
+    daemon::{
+        DEFAULT_SOCK,
+        communication::{Message, MessageHeader, MessageKind, MessageTrait},
     },
+    dec, enc,
 };
 
 /// Write a message on a given stream.
@@ -36,7 +36,7 @@ pub async fn write_message<M: MessageTrait>(
     tcp_stream: &mut TcpStream,
     msg: Message<M>,
 ) -> Result<()> {
-    let enc_msg = MessageHeader::wrap(enc!(msg), msg.get_kind());
+    let enc_msg = MessageHeader::wrap(enc!(msg)?, msg.get_kind())?;
     tcp_stream
         .write_all(&enc_msg)
         .await
@@ -156,7 +156,7 @@ pub async fn read_next_message(
     tcp_stream: &mut TcpStream,
     kind: MessageKind,
 ) -> Result<Option<Vec<u8>>> {
-    let header_length = MessageHeader::get_header_length();
+    let header_length = MessageHeader::get_header_length()?;
     let mut header = vec![0; header_length];
 
     // Read message header

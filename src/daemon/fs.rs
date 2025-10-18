@@ -67,8 +67,8 @@ pub fn init_fs() -> Result<PathBuf> {
 /// - The process working directory path
 fn hash_socket_path(pid: &ProcessId) -> Hash {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(pid.sock.ip().to_string().as_bytes());
-    hasher.update(pid.path.to_string_lossy().as_bytes());
+    hasher.update(pid.ip().to_string().as_bytes());
+    hasher.update(pid.path().to_string_lossy().as_bytes());
     hasher.finalize()
 }
 
