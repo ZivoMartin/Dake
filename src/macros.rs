@@ -1,12 +1,17 @@
 #[macro_export]
 macro_rules! dec {
-    ($bytes:expr $(,$t:ty)?) => {{ bincode::deserialize(&($bytes[..])) }};
+    ($bytes:expr) => {
+        postcard::from_bytes(&$bytes[..])
+    };
+    ($bytes:expr, $t:ty) => {
+        postcard::from_bytes::<$t>(&$bytes[..])
+    };
 }
 
 #[macro_export]
 macro_rules! enc {
     ($var:expr) => {
-        bincode::serialize(&$var)
+        postcard::to_allocvec(&$var)
     };
 }
 

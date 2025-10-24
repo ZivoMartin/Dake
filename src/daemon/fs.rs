@@ -15,12 +15,13 @@ use anyhow::{Context, Result, bail};
 use blake3::{self, Hash};
 use directories::ProjectDirs;
 use std::{
-    fs::{create_dir, create_dir_all, remove_file, write},
+    env::var,
+    fs::{create_dir, create_dir_all, read_dir, remove_dir_all, remove_file, write},
     path::PathBuf,
 };
 use tracing::{error, info, warn};
 
-use crate::{makefile::RemoteMakefile, process_id::ProcessId};
+use crate::{env_variables::EnvVariable, makefile::RemoteMakefile, process_id::ProcessId};
 
 /// Returns the base path for Dake's working directory.
 ///
@@ -31,12 +32,18 @@ use crate::{makefile::RemoteMakefile, process_id::ProcessId};
 /// # Errors
 /// Fails if the project directory cannot be determined.
 fn get_dake_path() -> Result<PathBuf> {
-    ProjectDirs::from("com", "zivo_martin", "dake")
-        .context("When fetching the project path.")
-        .map(|d| d.project_path().to_path_buf())
+    var(EnvVariable::DakeSpacePath.to_string())
+        .map(PathBuf::from)
+        .or_else(|_| {
+            ProjectDirs::from("com", "zivo_martin", "dake")
+                .context("When fetching the project path.")
+                .map(|d| d.project_path().to_path_buf())
+        })
+        .context("Failed to fetch dake space path.")
 }
 
 /// Initializes the Dake filesystem structure if not already present.
+
 ///
 /// If the directory exists but is not a directory, this function fails.
 ///
@@ -121,4 +128,29 @@ pub fn push_makefile(makefile: &RemoteMakefile, pid: &ProcessId) -> Result<()> {
                 pid, path
             );
         })
+}
+
+/// Recursively deletes a file or directory and logs the total size removed.
+pub fn clean() -> Result<()> {
+    let path = get_dake_path()?;
+    let size = calculate_size(&path)?;
+    let _ = remove_dir_all(&path);
+    info!("Removed {:?} ({} bytes)", path, size);
+    Ok(())
+}
+
+/// Calculates the total size of a file or directory recursively.
+fn calculate_size(path: &PathBuf) -> Result<u64> {
+    if path.is_file() {
+        Ok(std::fs::metadata(path)?.len())
+    } else if path.is_dir() {
+        let mut total = 0;
+        for entry in read_dir(path)? {
+            let entry = entry?;
+            total += calculate_size(&entry.path())?;
+        }
+        Ok(total)
+    } else {
+        Ok(0)
+    }
 }

@@ -10,6 +10,7 @@ use crate::{
 };
 
 /// Receives a remote makefile, writes it to disk, and replies with an acknowledgment.
+#[tracing::instrument]
 pub async fn receiv_makefile(
     MessageCtx { pid, client, state }: MessageCtx,
     makefile: RemoteMakefile,

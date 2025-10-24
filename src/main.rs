@@ -18,7 +18,11 @@ use std::{
 };
 
 use clap::{CommandFactory, Parser, Subcommand};
-use dake::{caller, daemon, fetch};
+use dake::{
+    caller,
+    daemon::{self, fs},
+    fetch,
+};
 use tracing::info;
 
 /// CLI root structure used by `clap` for parsing arguments.
@@ -52,6 +56,8 @@ enum Commands {
         target: String,
     },
 
+    Clean,
+
     /// Start the Dake daemon
     Daemon,
 
@@ -66,6 +72,9 @@ enum Commands {
 /// to the relevant Dake subsystem (`fetch`, `daemon`, or `caller`).
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
+    // Init tracing
+    tracing_subscriber::fmt::init();
+
     // Parse command-line arguments
     let cli = Cli::parse();
     info!("Parsed CLI arguments: {:?}", cli);
@@ -97,6 +106,13 @@ async fn main() -> anyhow::Result<ExitCode> {
             let exit_code = caller::make(args).await?;
             info!("Caller command completed successfully");
             exit_code
+        }
+
+        Some(Commands::Clean) => {
+            info!("Cleaning dake space..");
+            fs::clean()?;
+            info!("Clean command completed successfully.");
+            0
         }
 
         None => {

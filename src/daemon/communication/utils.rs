@@ -12,7 +12,12 @@
 //! All operations rely on the message protocol defined in [`MessageHeader`] and
 //! [`MessageKind`].
 
-use std::{net::SocketAddr, process::Command, time::Duration};
+use std::{
+    env::var,
+    net::{IpAddr, SocketAddr, UdpSocket},
+    process::Command,
+    time::Duration,
+};
 
 use anyhow::{Context, Result, bail};
 use tokio::{
@@ -24,11 +29,10 @@ use tokio::{
 use tracing::{error, info, warn};
 
 use crate::{
-    daemon::{
-        DEFAULT_SOCK,
-        communication::{Message, MessageHeader, MessageKind, MessageTrait},
-    },
+    daemon::communication::{DEFAULT_PORT, Message, MessageHeader, MessageKind, MessageTrait},
     dec, enc,
+    env_variables::EnvVariable,
+    utils::get_dake_path,
 };
 
 /// Write a message on a given stream.
@@ -40,7 +44,11 @@ pub async fn write_message<M: MessageTrait>(
     tcp_stream
         .write_all(&enc_msg)
         .await
-        .context("When writing on the stream")
+        .context("When writing on the stream")?;
+    tcp_stream
+        .flush()
+        .await
+        .context("Failed to flush on the TCP stream")
 }
 
 /// Connect with tcp on the given socket.
@@ -64,19 +72,54 @@ pub async fn send_message<M: MessageTrait>(msg: Message<M>, sock: SocketAddr) ->
     Ok(stream)
 }
 
-/// Returns the default daemon socket address.
-pub fn get_daemon_sock() -> SocketAddr {
-    DEFAULT_SOCK
+pub fn get_daemon_port() -> u16 {
+    var(EnvVariable::DaemonPort.to_string())
+        .context("Failed to get the daemon port with environment variable.")
+        .and_then(|port| {
+            let err = format!(
+                "Failed to parse the content of {} as an integer.",
+                EnvVariable::DaemonPort
+            );
+            let res = port.parse::<u16>().context(err.clone());
+            if let Err(e) = &res {
+                warn!("{err} {e}");
+            }
+            res
+        })
+        .unwrap_or(DEFAULT_PORT)
 }
 
-/// Sends a message directly to the daemon.
-/// Returns an error if sending fails.
-pub async fn contact_daemon<M: MessageTrait>(msg: Message<M>) -> Result<TcpStream> {
-    let sock = get_daemon_sock();
-    info!("Utils: Contacting daemon at {}", sock);
-    send_message(msg, sock)
-        .await
-        .context("When contacting daemon.")
+pub fn get_daemon_ip() -> Result<IpAddr> {
+    var(EnvVariable::DaemonIp.to_string())
+        .context("Failed to get the ip with environment variable.")
+        .and_then(|ip| {
+            let err = format!(
+                "Failed to parse the content of {} as an ip.",
+                EnvVariable::DaemonIp
+            );
+            let res = ip.parse::<IpAddr>().context(err.clone());
+            if let Err(e) = &res {
+                warn!("{err} {e}");
+            }
+            res
+        })
+        .or_else(|_| {
+            let socket = UdpSocket::bind("0.0.0.0:0")
+                .context("Failed to bind on udp to get the default daemon address.")?;
+            Ok(socket
+                .local_addr()
+                .context("Failed to fetch local address on the UDP socket.")?
+                .ip())
+        })
+}
+
+/// Returns the daemon's socket address based on environment variables
+/// or defaults. If IP is missing, returns an error.
+/// If port is missing, uses DEFAULT_PORT.
+pub fn get_daemon_sock() -> Result<SocketAddr> {
+    let ip = get_daemon_ip()?;
+    let port: u16 = get_daemon_port();
+    Ok(SocketAddr::new(ip, port))
 }
 
 /// Sends a message to the daemon, starting it if not already running.
@@ -88,30 +131,37 @@ pub async fn contact_daemon<M: MessageTrait>(msg: Message<M>) -> Result<TcpStrea
 ///
 /// # Errors
 /// Returns an error if the daemon cannot be started or contacted.
-pub async fn contact_daemon_or_start_it<M: MessageTrait + 'static>(msg: Message<M>) -> Result<()> {
-    if let Err(e) = contact_daemon(msg.clone()).await {
+pub async fn contact_daemon_or_start_it<M: MessageTrait + 'static>(
+    msg: Message<M>,
+    daemon_addr: SocketAddr,
+) -> Result<()> {
+    if let Err(e) = send_message(msg.clone(), daemon_addr).await {
         for cause in e.chain() {
             if let Some(e) = cause.downcast_ref::<tokio::io::Error>() {
                 if matches!(e.kind(), ErrorKind::ConnectionRefused) {
-                    warn!("Utils: Daemon not running, attempting to spawn it...");
+                    info!("Daemon not running, attempting to spawn it...");
 
-                    Command::new("target/debug/dake")
-                        .arg("daemon")
-                        .spawn()
-                        .context("Failed to spawn the daemon.")?;
+                    Command::new(
+                        get_dake_path()
+                            .context("Failed to fetch dake path when starting daemon.")?,
+                    )
+                    .arg("daemon")
+                    .spawn()
+                    .context("Failed to spawn the daemon.")?;
 
                     info!("Utils: Daemon process spawned, waiting for availability...");
 
                     let cloned_msg = msg.clone();
-                    let message_sending =
-                        spawn(async move { while contact_daemon(msg.clone()).await.is_err() {} });
+                    let message_sending = spawn(async move {
+                        while send_message(msg.clone(), daemon_addr).await.is_err() {}
+                    });
 
                     return match timeout(Duration::from_secs(1), message_sending).await {
                         Ok(_) => {
                             info!("Utils: Daemon is responsive, message sent successfully");
                             Ok(())
                         }
-                        Err(_) => match contact_daemon(cloned_msg).await {
+                        Err(_) => match send_message(cloned_msg, daemon_addr).await {
                             Ok(_) => {
                                 info!("Utils: Retried and successfully sent message to daemon");
                                 Ok(())

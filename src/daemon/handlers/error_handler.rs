@@ -4,6 +4,7 @@ use tracing::warn;
 
 use crate::daemon::{communication::MessageCtx, communication::Notif};
 
+#[tracing::instrument]
 pub async fn handle_error(
     MessageCtx { pid, state, .. }: MessageCtx,
     guilty_node: SocketAddr,

@@ -2,7 +2,7 @@ use derive_getters::Getters;
 
 use crate::makefile::RemoteMakefile;
 
-#[derive(Getters)]
+#[derive(Getters, Debug)]
 pub struct RemoteMakefileSet {
     remote_makefiles: Vec<RemoteMakefile>,
     my_makefile: String,

@@ -72,7 +72,7 @@ pub async fn fetch(
     let mut tcp_stream = loop {
         match listener.accept().await {
             Ok((stream, remote_sock)) => {
-                if remote_sock == sock {
+                if remote_sock.ip() == sock.ip() {
                     info!("Accepted connection from expected daemon {}", remote_sock);
                     break stream;
                 } else {

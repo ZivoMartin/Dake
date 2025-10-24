@@ -3,14 +3,6 @@
 //! This module implements the logic to build a [`RemoteMakefileSet`] from a
 //! stream of parsed [`Token`]s produced by the lexer.
 //!
-//! Responsibilities:
-//! - Generate local and remote makefiles from tokens.
-//! - Handle `Target` rules by rewriting them into either a fetch command or a
-//!   direct target rule, depending on the associated [`TargetLabel`].
-//! - Handle `Directive`s such as [`RootDef`] to register root paths.
-//! - Ensure that each IP involved in the distributed build has its own
-//!   [`RemoteMakefile`].
-//!
 //! The first makefile is considered the "primary" one, while additional
 //! makefiles are stored separately.
 
@@ -29,10 +21,6 @@ use tracing::{info, warn};
 impl RemoteMakefileSet {
     /// Generates a new [`RemoteMakefileSet`] from a set of tokens.
     ///
-    /// # Arguments
-    /// * `tokens` - The list of tokens parsed from a Makefile.
-    /// * `pid` - The process id.
-    ///
     /// # Behavior
     /// - Raw text (`Token::RawText`) is appended to all makefiles.
     /// - Target rules (`Token::Target`) are rewritten into:
@@ -44,7 +32,7 @@ impl RemoteMakefileSet {
     ///
     /// # Returns
     /// A new [`RemoteMakefileSet`] containing the distributed makefiles.
-    pub fn generate(tokens: Vec<Token>, pid: ProcessId) -> Self {
+    pub fn generate(tokens: Vec<Token>, pid: ProcessId, dake_path: PathBuf) -> Self {
         info!(
             "RemoteMakefileSet: Starting generation with {} tokens",
             tokens.len()
@@ -68,8 +56,9 @@ impl RemoteMakefileSet {
                 },
             };
             format!(
-                "target/debug/dake fetch \"{:?}\" {} {} {path} \"{target}\"\n",
-                pid.path(),
+                "{} fetch \"{}\" {} {} {path} \"{target}\"\n",
+                dake_path.display(),
+                pid.path().display(),
                 pid.id(),
                 label.sock
             )

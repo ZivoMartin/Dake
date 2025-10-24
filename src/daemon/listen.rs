@@ -10,6 +10,8 @@
 //! The daemon runs indefinitely, spawning tasks to handle each connection
 //! asynchronously.
 
+use std::net::{IpAddr, Ipv4Addr};
+
 use anyhow::{Context, Result};
 use tokio::{net::TcpListener, task::spawn};
 use tracing::{info, warn};
@@ -17,7 +19,8 @@ use tracing::{info, warn};
 use crate::{
     daemon::{
         communication::{
-            DaemonMessage, Message, MessageCtx, MessageKind, get_daemon_sock, read_next_message,
+            DaemonMessage, Message, MessageCtx, MessageKind, get_daemon_ip, get_daemon_port,
+            read_next_message,
         },
         fs::init_fs,
         handlers::{
@@ -32,18 +35,26 @@ use crate::{
 /// Starts the daemon listener.
 /// For each incoming [`DaemonMessage`], a new task is spawned to run the
 /// corresponding handler.
+#[tracing::instrument]
 pub async fn start() -> Result<()> {
     // Initialize filesystem structure before starting daemon
     init_fs()?;
     info!("Daemon filesystem initialized");
 
     // Bind the daemon listener socket
-    let listener = TcpListener::bind(get_daemon_sock())
+    let ip = get_daemon_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
+    let port = get_daemon_port();
+
+    let listener = TcpListener::bind(format!("{ip}:{port}"))
         .await
         .context("When starting the daemon.")?;
-    info!("Daemon started and listening on {}", get_daemon_sock());
 
-    let state = State::new();
+    let daemon_sock = listener
+        .local_addr()
+        .context("Failed to fetch the daemon socket from the daemon TCP listener.")?;
+    info!("Daemon started and listening on {}", daemon_sock);
+
+    let state = State::new(daemon_sock);
 
     // Main accept loop: handle new TCP connections
     loop {

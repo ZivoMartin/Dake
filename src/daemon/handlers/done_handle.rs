@@ -4,10 +4,9 @@ use notifier_hub::notifier::ChannelState;
 use tokio::{select, time::sleep};
 use tracing::{info, warn};
 
-use crate::daemon::communication::{
-    AckMessage, Message, MessageCtx, Notif, get_daemon_sock, send_message,
-};
+use crate::daemon::communication::{AckMessage, Message, MessageCtx, Notif, send_message};
 
+#[tracing::instrument]
 pub async fn handle_done(MessageCtx { pid, state, client }: MessageCtx) {
     match state.remove_process(&pid).await {
         Ok(Some(data)) => {
@@ -51,7 +50,7 @@ pub async fn handle_done(MessageCtx { pid, state, client }: MessageCtx) {
     }
 
     if let Err(e) = send_message(
-        Message::new(AckMessage::Ok, pid.clone(), get_daemon_sock()),
+        Message::new(AckMessage::Ok, pid.clone(), state.daemon_sock),
         client,
     )
     .await

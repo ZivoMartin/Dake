@@ -8,8 +8,7 @@ use tracing::{debug, info, warn};
 
 use crate::daemon::{
     communication::{
-        DaemonMessage, FetcherMessage, Message, MessageCtx, connect, get_daemon_sock, send_message,
-        write_message,
+        DaemonMessage, FetcherMessage, Message, MessageCtx, connect, send_message, write_message,
     },
     execute_make,
     fs::get_makefile_path,
@@ -18,12 +17,13 @@ use crate::daemon::{
 /// Handles a "fetch" request.
 /// Log internal errors, sends stderr messages to the client,
 /// and reports build failures to the main daemon. It never panics.
+#[tracing::instrument]
 pub async fn handle_fetch(
     MessageCtx { pid, client, state }: MessageCtx,
     target: String,
     labeled_path: Option<PathBuf>,
 ) {
-    let daemon_sock = get_daemon_sock();
+    let daemon_sock = state.daemon_sock;
 
     // Helper closure to send both a user-facing error message
     // and a `MakeError` to the daemon.
@@ -116,7 +116,7 @@ pub async fn handle_fetch(
             if !status.success() {
                 warn!("Fetcher: make exited with status {exit_code} for target '{target}'");
                 let inner = DaemonMessage::MakeError {
-                    guilty_node: get_daemon_sock(),
+                    guilty_node: daemon_sock,
                     exit_code,
                 };
 
@@ -184,7 +184,7 @@ pub async fn handle_fetch(
             break;
         }
 
-        let message = Message::new(FetcherMessage::Object(buf), pid.clone(), get_daemon_sock());
+        let message = Message::new(FetcherMessage::Object(buf), pid.clone(), daemon_sock);
         if let Err(e) = write_message(&mut stream, message).await {
             warn_and_forward!("Failed to send packet to {client}: {e:?}", err);
         }

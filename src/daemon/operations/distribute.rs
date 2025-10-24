@@ -20,9 +20,10 @@ use tracing::info;
 
 use crate::{
     daemon::{
-        communication::{DaemonMessage, Message, get_daemon_sock, send_message},
+        communication::{DaemonMessage, Message, send_message},
         operations::wait_acks::wait_acks,
         process_datas::ProcessDatas,
+        state::State,
     },
     makefile::RemoteMakefile,
     process_id::ProcessId,
@@ -34,12 +35,13 @@ use crate::{
 /// - Sending messages to remote hosts fails.
 /// - Not all acknowledgments are received within the timeout.
 pub async fn distribute(
+    state: &State,
     pid: ProcessId,
     makefiles: Vec<RemoteMakefile>,
     process_datas: ProcessDatas,
 ) -> Result<()> {
     // Prepare a temporary listener for acknowledgments
-    let mut caller_sock = get_daemon_sock();
+    let mut caller_sock = state.daemon_sock;
     caller_sock.set_port(0);
 
     info!("Distributer: Binding acknowledgment listener on ephemeral port");

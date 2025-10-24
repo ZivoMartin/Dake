@@ -19,7 +19,7 @@ use std::{
 use anyhow::{Error, Result};
 use tracing::info;
 
-use crate::daemon::DEFAULT_PORT;
+use crate::daemon::communication::DEFAULT_PORT;
 
 /// Represents a label for a build target in a distributed makefile.
 ///

@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use anyhow::{Context, Result, bail};
 use tokio::net::TcpListener;
 use tracing::warn;
@@ -6,14 +8,17 @@ use crate::{
     caller::utils::accept_specific_connection,
     daemon::communication::{
         DaemonMessage, Message, MessageKind, ProcessMessage, contact_daemon_or_start_it,
-        get_daemon_sock, read_next_message,
+        read_next_message,
     },
     dec,
     process_id::{ProcessId, ProjectId},
 };
 
-pub async fn fetch_fresh_id(listener: &TcpListener, pid: ProjectId) -> Result<ProcessId> {
-    let daemon_sock = get_daemon_sock();
+pub async fn fetch_fresh_id(
+    listener: &TcpListener,
+    pid: ProjectId,
+    daemon_sock: SocketAddr,
+) -> Result<ProcessId> {
     let caller_addr = listener
         .local_addr()
         .context("When requesting the caller socket address")?;
@@ -22,7 +27,7 @@ pub async fn fetch_fresh_id(listener: &TcpListener, pid: ProjectId) -> Result<Pr
     let inner = DaemonMessage::FreshId;
     let msg = Message::new(inner, default_pid, caller_addr);
 
-    contact_daemon_or_start_it(msg).await?;
+    contact_daemon_or_start_it(msg, daemon_sock).await?;
 
     let mut tcp_stream = accept_specific_connection(&listener, daemon_sock.ip()).await?;
 

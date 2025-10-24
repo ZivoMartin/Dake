@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::{
+    net::SocketAddr,
     path::PathBuf,
     process::{ExitStatus, Stdio},
     time::Duration,
@@ -15,7 +16,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     daemon::{
-        communication::{Message, Notif, ProcessMessage, get_daemon_sock, send_message},
+        communication::{Message, Notif, ProcessMessage, send_message},
         state::State,
     },
     process_id::ProcessId,
@@ -50,6 +51,8 @@ pub async fn execute_make(
         pid, current_dir
     );
 
+    let daemon_sock = state.daemon_sock;
+
     // --- Step 1: Configure and spawn process ---
     let mut cmd = Command::new("make");
 
@@ -71,13 +74,18 @@ pub async fn execute_make(
     debug!("Spawned make process (pid={:?})", process.id());
 
     // --- Step 2: Log forwarding helpers ---
-    fn spawn_log_forwarder<R, F>(pid: ProcessId, pipe: R, make_msg: F) -> JoinHandle<()>
+    fn spawn_log_forwarder<R, F>(
+        pid: ProcessId,
+        pipe: R,
+        make_msg: F,
+        daemon_sock: SocketAddr,
+    ) -> JoinHandle<()>
     where
         R: AsyncBufRead + Unpin + Send + 'static,
         F: Fn(String) -> ProcessMessage + Send + 'static,
     {
         spawn(async move {
-            let client = get_daemon_sock();
+            let client = daemon_sock;
             let mut lines = pipe.lines();
 
             while let Ok(Some(line)) = lines.next_line().await {
@@ -95,27 +103,26 @@ pub async fn execute_make(
 
     if let Some(stdout) = process.stdout.take().map(BufReader::new) {
         info!("Attaching stdout log handler for {:?}", pid);
-        handlers.push(spawn_log_forwarder(pid.clone(), stdout, |log| {
-            ProcessMessage::StdoutLog { log }
-        }));
+        handlers.push(spawn_log_forwarder(
+            pid.clone(),
+            stdout,
+            |log| ProcessMessage::StdoutLog { log },
+            daemon_sock,
+        ));
     } else {
         warn!("Failed to attach stdout for process {:?}", pid);
     }
 
     if let Some(stderr) = process.stderr.take().map(BufReader::new) {
         info!("Attaching stderr log handler for {:?}", pid);
-        handlers.push(spawn_log_forwarder(pid.clone(), stderr, |log| {
-            ProcessMessage::StderrLog { log }
-        }));
+        handlers.push(spawn_log_forwarder(
+            pid.clone(),
+            stderr,
+            |log| ProcessMessage::StderrLog { log },
+            daemon_sock,
+        ));
     } else {
         warn!("Failed to attach stderr for process {:?}", pid);
-    }
-
-    // Await all log handlers asynchronously (fire-and-forget)
-    for handle in handlers {
-        if let Err(e) = handle.await {
-            warn!("One of the log handlers panicked or failed: {e:?}");
-        }
     }
 
     // --- Step 4: Subscribe to notifier hub for process cancellation ---
@@ -179,6 +186,13 @@ pub async fn execute_make(
         pid,
         exit_status.code().unwrap_or(-1)
     );
+
+    // Await all log handlers asynchronously (fire-and-forget)
+    for handle in handlers {
+        if let Err(e) = handle.await {
+            warn!("One of the log handlers panicked or failed: {e:?}");
+        }
+    }
 
     Ok(Some(exit_status))
 }

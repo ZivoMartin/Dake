@@ -11,7 +11,9 @@ pub use self::{
     },
     notif::Notif,
     utils::{
-        connect, contact_daemon, contact_daemon_or_start_it, get_daemon_sock, read_next_message,
-        send_message, write_message,
+        connect, contact_daemon_or_start_it, get_daemon_ip, get_daemon_port, get_daemon_sock,
+        read_next_message, send_message, write_message,
     },
 };
+
+pub const DEFAULT_PORT: u16 = 1808;

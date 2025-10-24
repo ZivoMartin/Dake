@@ -10,6 +10,7 @@ pub enum OutputFile {
     Stderr,
 }
 
+#[tracing::instrument]
 pub async fn handle_log(
     MessageCtx { pid, state, .. }: MessageCtx,
     log: String,

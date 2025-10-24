@@ -4,7 +4,7 @@ use tracing::warn;
 
 use crate::{
     daemon::{
-        communication::{DaemonMessage, Message, get_daemon_sock, send_message},
+        communication::{DaemonMessage, Message, send_message},
         operations::wait_acks,
         state::State,
     },
@@ -17,7 +17,7 @@ pub async fn broadcast_done(state: &State, pid: ProcessId) -> Result<()> {
         None => bail!("The process {pid:?} is not registered."),
     };
 
-    let mut caller_sock = get_daemon_sock();
+    let mut caller_sock = state.daemon_sock;
     caller_sock.set_port(0);
 
     let listener = TcpListener::bind(caller_sock).await?;

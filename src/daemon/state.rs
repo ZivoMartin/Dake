@@ -1,4 +1,10 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Formatter},
+    net::SocketAddr,
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::{Result, bail};
 use derive_getters::Getters;
@@ -13,16 +19,30 @@ use crate::{
 
 type Wrapped<T> = Arc<Mutex<T>>;
 
-#[derive(Clone, Default, Getters)]
+#[derive(Clone, Getters)]
 pub struct State {
     id_database: Wrapped<HashMap<ProjectId, u64>>,
     notifier_hub: Wrapped<NotifierHub<Arc<Notif>, ProcessId>>,
     processes: Wrapped<HashMap<ProcessId, ProcessDatas>>,
+    pub daemon_sock: SocketAddr,
+}
+
+impl Debug for State {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("State")
+            .field("daemon_sock", &self.daemon_sock)
+            .finish()
+    }
 }
 
 impl State {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(daemon_sock: SocketAddr) -> Self {
+        Self {
+            daemon_sock,
+            id_database: Wrapped::default(),
+            notifier_hub: Wrapped::default(),
+            processes: Wrapped::default(),
+        }
     }
 
     pub async fn remove_process(&self, pid: &ProcessId) -> Result<Option<ProcessDatas>> {

@@ -16,9 +16,7 @@
 use crate::{
     daemon::{
         broadcast_done,
-        communication::{
-            Message, MessageCtx, Notif, ProcessMessage, get_daemon_sock, send_message,
-        },
+        communication::{Message, MessageCtx, Notif, ProcessMessage, send_message},
         distribute, execute_make,
         handlers::OutputFile,
         process_datas::ProcessDatas,
@@ -36,6 +34,7 @@ use tracing::{debug, error, info, warn};
 /// 3. Spawns and monitors the local `make` process.
 /// 4. Forwards logs and handles error/cancel notifications.
 /// 5. Sends a final [`ProcessMessage::End`] to the originating client.
+#[tracing::instrument]
 pub async fn new_process(
     MessageCtx { state, client, pid }: MessageCtx,
     makefiles: Vec<RemoteMakefile>,
@@ -43,7 +42,7 @@ pub async fn new_process(
 ) {
     info!(?pid, %client, "NewProcess: starting new process handler");
 
-    let daemon_addr = get_daemon_sock();
+    let daemon_addr = state.daemon_sock;
 
     if daemon_addr != pid.sock() {
         warn!(
@@ -59,7 +58,7 @@ pub async fn new_process(
     info!(?pid, hosts = ?involved_hosts, "Distributing makefiles to involved hosts");
     let process_datas = ProcessDatas::new(daemon_addr, involved_hosts.clone(), args.clone());
 
-    match distribute(pid.clone(), makefiles, process_datas.clone()).await {
+    match distribute(&state, pid.clone(), makefiles, process_datas.clone()).await {
         Ok(_) => info!(?pid, "Makefiles successfully distributed"),
         Err(e) => {
             let msg = ProcessMessage::StderrLog {
@@ -156,11 +155,7 @@ pub async fn new_process(
     };
 
     // --- Step 4: Send final End message ---
-    let end_message = Message::new(
-        ProcessMessage::End { exit_code },
-        pid.clone(),
-        get_daemon_sock(),
-    );
+    let end_message = Message::new(ProcessMessage::End { exit_code }, pid.clone(), daemon_addr);
 
     match send_message(end_message, client).await {
         Ok(_) => info!(?pid, %client, exit_code, "Sent End message to caller"),

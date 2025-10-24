@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use anyhow::{Context, Result};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
@@ -5,25 +7,24 @@ use tracing::{error, info, warn};
 use crate::{
     caller::utils::accept_specific_connection,
     daemon::communication::{
-        DaemonMessage, Message, MessageKind, ProcessMessage, contact_daemon, get_daemon_sock,
-        read_next_message,
+        DaemonMessage, Message, MessageKind, ProcessMessage, read_next_message, send_message,
     },
     dec,
     makefile::RemoteMakefileSet,
     process_id::ProcessId,
 };
 
+#[tracing::instrument]
 pub async fn start(
     listener: &TcpListener,
     pid: ProcessId,
     makefiles: RemoteMakefileSet,
     args: Vec<String>,
+    daemon_sock: SocketAddr,
 ) -> Result<i32> {
     let caller_addr = listener
         .local_addr()
         .context("When requesting the caller socket address")?;
-
-    let daemon_sock = get_daemon_sock();
 
     let message = Message::new(
         DaemonMessage::NewProcess {
@@ -36,7 +37,7 @@ pub async fn start(
 
     info!("Sending NewProcess message to daemon at {}", daemon_sock);
 
-    contact_daemon(message).await?;
+    send_message(message, daemon_sock).await?;
     info!("NewProcess message delivered successfully");
 
     let mut tcp_stream = accept_specific_connection(&listener, daemon_sock.ip()).await?;
