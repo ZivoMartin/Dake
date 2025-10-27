@@ -17,7 +17,7 @@ use std::{
     process::{ExitCode, exit},
 };
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use dake::{
     caller,
     daemon::{self, fs},
@@ -26,12 +26,19 @@ use dake::{
 use tracing::info;
 
 /// CLI root structure used by `clap` for parsing arguments.
+///
+/// If no subcommand is specified, the arguments are forwarded
+/// to the `caller` mode (make interception).
 #[derive(Parser, Debug)]
 #[command(infer_subcommands = true, allow_external_subcommands = true)]
 struct Cli {
-    /// Subcommands for Dake
+    /// Optional Dake subcommand (e.g., daemon, fetch, clean)
     #[command(subcommand)]
     command: Option<Commands>,
+
+    /// Fallback arguments passed directly to the caller
+    #[arg(trailing_var_arg = true)]
+    args: Vec<String>,
 }
 
 /// All supported subcommands for the CLI.
@@ -56,14 +63,11 @@ enum Commands {
         target: String,
     },
 
+    /// Clean up Dake cache and workspace
     Clean,
 
     /// Start the Dake daemon
     Daemon,
-
-    /// Caller mode: forward arguments to `make` and run the process
-    #[command(external_subcommand)]
-    Caller(Vec<String>),
 }
 
 /// Entry point of the application.
@@ -72,14 +76,11 @@ enum Commands {
 /// to the relevant Dake subsystem (`fetch`, `daemon`, or `caller`).
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
-    // Init tracing
     tracing_subscriber::fmt::init();
 
-    // Parse command-line arguments
     let cli = Cli::parse();
     info!("Parsed CLI arguments: {:?}", cli);
 
-    // Match on subcommand and execute the corresponding logic
     let exit_code = match cli.command {
         Some(Commands::Fetch {
             target,
@@ -90,36 +91,28 @@ async fn main() -> anyhow::Result<ExitCode> {
         }) => {
             info!("Executing Fetch command for target '{target}' with socket {sock}");
             fetch::fetch(target, labeled_path, caller_path, id, sock).await?;
-            info!("Fetch command completed successfully");
             0
         }
 
         Some(Commands::Daemon) => {
             info!("Starting daemon...");
             daemon::start().await?;
-            info!("Daemon terminated normally");
             0
-        }
-
-        Some(Commands::Caller(args)) => {
-            info!("Executing Caller command with args: {:?}", args);
-            let exit_code = caller::make(args).await?;
-            info!("Caller command completed successfully");
-            exit_code
         }
 
         Some(Commands::Clean) => {
             info!("Cleaning dake space..");
             fs::clean()?;
-            info!("Clean command completed successfully.");
             0
         }
 
         None => {
-            Cli::command().print_help()?;
-            1
+            info!("Executing default Caller mode with args: {:?}", cli.args);
+            let exit_code = caller::make(cli.args).await?;
+            exit_code
         }
     };
+
     info!("Dake CLI execution finished");
     exit(exit_code)
 }

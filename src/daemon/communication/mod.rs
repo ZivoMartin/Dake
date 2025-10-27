@@ -1,6 +1,7 @@
 mod message_ctx;
 mod messages;
 mod notif;
+mod socket;
 mod utils;
 
 pub use self::{
@@ -17,3 +18,4 @@ pub use self::{
 };
 
 pub const DEFAULT_PORT: u16 = 1808;
+pub const DAEMON_UNIX_SOCKET: &str = "/tmp/dake_daemon.sock";

@@ -2,15 +2,13 @@ FROM rust:1.83-alpine AS builder
 
 RUN apk add --no-cache git musl-dev openssl-dev pkgconfig
 
-# Clone and build dake
-WORKDIR /app
-RUN git clone https://github.com/yourusername/dake.git .
+RUN rustup toolchain install nightly && rustup default nightly
+
+WORKDIR /Dake
+RUN git clone https://github.com/ZivoMartin/Dake.git .
 RUN cargo build --release
 
-# Runtime image: minimal alpine with dake binary only
 FROM alpine:latest
+COPY --from=builder /Dake/target/release/dake /usr/local/bin/dake
 
-COPY --from=builder /app/target/debug/dake /usr/local/bin/dake
-
-# Command to run when container starts
-ENTRYPOINT ["dake", "daemon"]
+ENTRYPOINT ["/bin/sh", "-c", "sleep infinity"]

@@ -6,7 +6,7 @@
 //! Messages are serialized with `bincode` and transmitted across TCP sockets
 //! between the daemon, caller, distributor, and fetcher components.
 
-use std::{net::SocketAddr, path::PathBuf};
+use std::{fmt::Debug, net::SocketAddr, path::PathBuf};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ use crate::{
 /// A trait implemented by all message types.
 ///
 /// Defines how to retrieve the corresponding [`MessageKind`].
-pub trait MessageTrait: Clone + Serialize + Send {
+pub trait MessageTrait: Clone + Serialize + Send + Debug {
     /// Returns the [`MessageKind`] associated with this message.
     fn get_kind(&self) -> MessageKind;
 }

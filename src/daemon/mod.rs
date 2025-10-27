@@ -1,4 +1,5 @@
 pub mod communication;
+mod daemon_stream;
 pub mod fs;
 mod handlers;
 mod listen;

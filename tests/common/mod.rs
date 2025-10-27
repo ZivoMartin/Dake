@@ -1,2 +1,2 @@
+pub mod cluster;
 pub mod docker;
-pub mod setup;

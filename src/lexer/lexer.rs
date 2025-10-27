@@ -68,7 +68,7 @@ pub fn lex(s: String) -> Result<LexingOutput> {
                 if line.is_empty() {
                     return;
                 }
-                let line = match line.split_once(':') {
+                let line = match line.rsplit_once(':') {
                     Some((left, right)) => {
                         if FORBIDDEN_RIGHT_PREFIX.iter().any(|s| right.starts_with(s)) {
                             Line::RawLine(format!("{line}\n"))
@@ -130,10 +130,8 @@ pub fn lex(s: String) -> Result<LexingOutput> {
                             let prefix = rest[..open].trim();
                             let inside = &rest[open + 1..open + close].trim();
 
-                            if !prefix.is_empty() {
-                                left_parsed =
-                                    Some((inside.to_string(), prefix.parse::<TargetLabel>()?));
-                            }
+                            left_parsed =
+                                Some((prefix.to_string(), inside.parse::<TargetLabel>()?));
 
                             rest = &rest[open + close + 1..];
                         } else {

@@ -106,6 +106,7 @@ pub fn get_daemon_ip() -> Result<IpAddr> {
         .or_else(|_| {
             let socket = UdpSocket::bind("0.0.0.0:0")
                 .context("Failed to bind on udp to get the default daemon address.")?;
+            socket.connect("8.8.8.8:80")?;
             Ok(socket
                 .local_addr()
                 .context("Failed to fetch local address on the UDP socket.")?
@@ -131,6 +132,7 @@ pub fn get_daemon_sock() -> Result<SocketAddr> {
 ///
 /// # Errors
 /// Returns an error if the daemon cannot be started or contacted.
+#[tracing::instrument]
 pub async fn contact_daemon_or_start_it<M: MessageTrait + 'static>(
     msg: Message<M>,
     daemon_addr: SocketAddr,
@@ -149,7 +151,7 @@ pub async fn contact_daemon_or_start_it<M: MessageTrait + 'static>(
                     .spawn()
                     .context("Failed to spawn the daemon.")?;
 
-                    info!("Utils: Daemon process spawned, waiting for availability...");
+                    info!("Daemon process spawned, waiting for availability...");
 
                     let cloned_msg = msg.clone();
                     let message_sending = spawn(async move {
@@ -158,12 +160,12 @@ pub async fn contact_daemon_or_start_it<M: MessageTrait + 'static>(
 
                     return match timeout(Duration::from_secs(1), message_sending).await {
                         Ok(_) => {
-                            info!("Utils: Daemon is responsive, message sent successfully");
+                            info!("Daemon is responsive, message sent successfully");
                             Ok(())
                         }
                         Err(_) => match send_message(cloned_msg, daemon_addr).await {
                             Ok(_) => {
-                                info!("Utils: Retried and successfully sent message to daemon");
+                                info!("Retried and successfully sent message to daemon");
                                 Ok(())
                             }
                             Err(e) => {
@@ -202,16 +204,16 @@ pub async fn contact_daemon_or_start_it<M: MessageTrait + 'static>(
 /// # Errors
 /// Returns an error if deserialization fails, if the message size is invalid,
 /// or if the message kind does not match.
-pub async fn read_next_message(
-    tcp_stream: &mut TcpStream,
+pub async fn read_next_message<S: AsyncReadExt + Unpin>(
+    stream: &mut S,
     kind: MessageKind,
 ) -> Result<Option<Vec<u8>>> {
     let header_length = MessageHeader::get_header_length()?;
     let mut header = vec![0; header_length];
 
     // Read message header
-    if tcp_stream.read_exact(&mut header).await.is_err() {
-        warn!("Utils: Connection closed while trying to read header");
+    if stream.read_exact(&mut header).await.is_err() {
+        info!("Connection closed while trying to read header");
         return Ok(None);
     }
 
@@ -223,7 +225,7 @@ pub async fn read_next_message(
 
     // Read message payload
     let mut message = vec![0; header.size as usize];
-    if let Err(e) = tcp_stream.read_exact(&mut message).await {
+    if let Err(e) = stream.read_exact(&mut message).await {
         if matches!(e.kind(), ErrorKind::UnexpectedEof) {
             error!("Utils: Header size did not match actual message size");
             bail!("The message size and the header annotated size doesn't match.");

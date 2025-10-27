@@ -135,7 +135,8 @@ pub async fn fetch(
                      Waiting for parent synchronization before exit...",
                     target
                 );
-                // Synchronization delay before termination
+                // Wait for parent to send Done notification before terminating
+                // This prevents premature process cleanup that could cause spurious errors
                 sleep(Duration::from_secs(90)).await;
             }
         }

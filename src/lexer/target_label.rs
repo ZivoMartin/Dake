@@ -54,10 +54,8 @@ impl FromStr for TargetLabel {
     /// # Supported formats
     /// - `"IP:PORT"` → uses provided port
     /// - `"IP"` → defaults to [`DEFAULT_PORT`]
+    /// - `"IP:PORT|PATH"` → with optional build directory path and port
     /// - `"IP|PATH"` → with optional build directory path
-    ///
-    /// # Errors
-    /// Returns an error if the socket or path is invalid.
     fn from_str(s: &str) -> Result<Self> {
         let parse_sock = |sock: &str| -> Result<SocketAddr> {
             sock.parse::<SocketAddr>().or_else(|_| {
@@ -68,7 +66,9 @@ impl FromStr for TargetLabel {
 
         Ok(match s.rsplit_once('|') {
             Some((sock, path)) => {
+                println!("{sock} {path}");
                 let addr = parse_sock(sock)?;
+
                 let path_buf: PathBuf = path.parse()?;
                 info!(
                     "TargetLabel: Parsed '{}' into addr={}, path={:?}",
@@ -77,6 +77,7 @@ impl FromStr for TargetLabel {
                 TargetLabel::new(addr, Some(path_buf))
             }
             None => {
+                println!("{s}");
                 let addr = parse_sock(s)?;
                 info!("TargetLabel: Parsed '{}' into addr={}, no path", s, addr);
                 TargetLabel::new(addr, None)
