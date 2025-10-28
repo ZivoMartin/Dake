@@ -297,6 +297,7 @@ dependencies = [
  "futures",
  "hex",
  "notifier_hub",
+ "once_cell",
  "postcard",
  "serde",
  "shiplift",
