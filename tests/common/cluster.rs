@@ -7,12 +7,15 @@ use futures::future::try_join_all;
 use tempfile::tempdir;
 
 use std::{
-    fs::write,
+    fs::{create_dir, remove_file, write},
     net::IpAddr,
     path::{Path, PathBuf},
 };
 use tokio::sync::OnceCell;
+#[cfg(debug_assertions)]
 use tracing::warn;
+
+const LOG_DIR: &str = "logs";
 
 #[derive(Debug)]
 pub struct Cluster {
@@ -27,6 +30,16 @@ impl Cluster {
         let network = "dake-net".to_string();
         println!("Creating network {network}");
         create_network(&network).await?;
+
+        let log_dir = PathBuf::from(LOG_DIR);
+        if !log_dir.is_dir() {
+            if log_dir.is_file() {
+                if let Err(e) = remove_file(&log_dir) {
+                    eprintln!("Failed to remove log_dir file: {e}")
+                }
+            }
+            create_dir(log_dir)?
+        }
 
         let mut nodes = Vec::new();
         for i in 0..size {
@@ -50,7 +63,7 @@ impl Cluster {
                 node,
                 "dake",
                 vec!["daemon"],
-                Some(PathBuf::from(format!("log_daemon_{node}"))),
+                Some(PathBuf::from(format!("{LOG_DIR}/log_daemon_{node}"))),
                 true,
             )
             .await?;
@@ -103,7 +116,10 @@ impl Cluster {
     }
 
     pub async fn start_dake(&self, id: &str, output: PathBuf) -> Result<()> {
-        container_exec(id, "dake", vec![], Some(output), false)
+        let mut path = PathBuf::from(LOG_DIR);
+        path.push(&output);
+
+        container_exec(id, "dake", vec![], Some(path), false)
             .await
             .context(format!("Failed to execute dake on {id}"))?;
         Ok(())
