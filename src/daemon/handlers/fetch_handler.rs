@@ -6,56 +6,56 @@ use std::{
 
 use tracing::{debug, info, warn};
 
-use crate::daemon::{
-    communication::{
-        DaemonMessage, FetcherMessage, Message, MessageCtx, connect, send_message, write_message,
-    },
-    execute_make,
-    fs::get_makefile_path,
+use crate::{
+    daemon::{MessageCtx, execute_make, fs::get_makefile_path},
+    network::{DaemonMessage, FetcherMessage, Message, Stream, send_message, write_message},
 };
 
 /// Handles a "fetch" request.
 /// Log internal errors, sends stderr messages to the client,
 /// and reports build failures to the main daemon. It never panics.
 #[tracing::instrument]
-pub async fn handle_fetch(
-    MessageCtx { pid, client, state }: MessageCtx,
+pub async fn handle_fetch<'a>(
+    MessageCtx { pid, stream, state }: MessageCtx<'a>,
     target: String,
     labeled_path: Option<PathBuf>,
 ) {
-    let daemon_sock = state.daemon_sock;
+    let caller_sock = match state.read_process_data(&pid).await {
+        Ok(Some(sock)) => sock,
+        _ => {
+            warn!("Failed to fetch the caller socket.");
+            return;
+        }
+    }
+    .caller_daemon;
+
+    let daemon_sock = state.daemon_sock();
 
     // Helper closure to send both a user-facing error message
     // and a `MakeError` to the daemon.
-    let forward_error = |user_message: String| async {
-        let sock = pid.sock();
+    let forward_error = |stream: &'a mut Stream, user_message: String| async {
+        let sock = caller_sock.clone();
+        let msg = Message::new(FetcherMessage::Failed, pid.clone());
 
-        let msg = Message::new(FetcherMessage::Failed, pid.clone(), daemon_sock);
-
-        if let Err(e) = send_message(msg, client).await {
-            warn!("Failed to send the Failed message to the fetcher {client}: {e:?}");
+        if let Err(e) = write_message(stream, msg).await {
+            warn!("Failed to send the Failed message to the fetcher: {e:?}");
         }
 
-        let msg = Message::new(
-            DaemonMessage::StderrLog { log: user_message },
-            pid.clone(),
-            daemon_sock,
-        );
+        let msg = Message::new(DaemonMessage::StderrLog { log: user_message }, pid.clone());
 
-        if let Err(e) = send_message(msg, sock).await {
+        if let Err(e) = send_message(msg, sock.clone()).await {
             warn!("Failed to send stderr log to {sock}: {e:?}");
         }
 
         let msg = Message::new(
             DaemonMessage::MakeError {
-                guilty_node: daemon_sock,
+                guilty_node: daemon_sock.clone(),
                 exit_code: 1,
             },
             pid.clone(),
-            daemon_sock,
         );
 
-        if let Err(e) = send_message(msg, sock).await {
+        if let Err(e) = send_message(msg, sock.clone()).await {
             warn!("Failed to forward MakeError to {sock}: {e:?}");
         }
     };
@@ -64,17 +64,17 @@ pub async fn handle_fetch(
     macro_rules! warn_and_forward {
         ($msg:expr) => {{
             warn!($msg);
-            forward_error("Dake encountered an internal error.".into()).await;
+            forward_error(stream, "Dake encountered an internal error.".into()).await;
             return;
         }};
         ($msg:expr, $user:expr) => {{
             warn!($msg);
-            forward_error($user.into()).await;
+            forward_error(stream, $user.into()).await;
             return;
         }};
     }
 
-    info!("Fetcher started for target '{target}' requested by {client}");
+    info!("Fetcher started for target '{target}' requested by the client");
 
     // --- Step 1: Resolve makefile path ---
     let mut path = match labeled_path.or_else(|| get_makefile_path(&pid).ok()) {
@@ -116,12 +116,12 @@ pub async fn handle_fetch(
             if !status.success() {
                 warn!("Fetcher: make exited with status {exit_code} for target '{target}'");
                 let inner = DaemonMessage::MakeError {
-                    guilty_node: daemon_sock,
+                    guilty_node: daemon_sock.clone(),
                     exit_code,
                 };
 
-                let msg = Message::new(inner, pid.clone(), pid.sock());
-                if let Err(e) = send_message(msg, pid.sock()).await {
+                let msg = Message::new(inner, pid.clone());
+                if let Err(e) = send_message(msg, caller_sock.clone()).await {
                     warn!("Failed to send build failure to {}: {e:?}", pid.sock());
                 }
             } else {
@@ -154,6 +154,14 @@ pub async fn handle_fetch(
     }
 
     // --- Step 5: Send artifact to client ---
+    let client = match stream.peer_addr() {
+        Ok(addr) => addr,
+        Err(e) => {
+            warn!("Failed to fetch fetcher client peer socket: {e}");
+            return;
+        }
+    };
+
     info!("Opening built artifact at {:?}", path);
     let file = match File::open(&path) {
         Ok(f) => f,
@@ -165,12 +173,6 @@ pub async fn handle_fetch(
         "Failed to forward '{target}' from {daemon_sock} to {client}. \
         The Dake daemon on {client} might be down."
     );
-
-    debug!("Connecting to client {client}");
-    let mut stream = match connect(client).await {
-        Ok(s) => s,
-        Err(e) => warn_and_forward!("Failed to connect to client {client}: {e:?}", err),
-    };
 
     info!("Streaming file '{target}' to {client}");
     loop {
@@ -184,8 +186,8 @@ pub async fn handle_fetch(
             break;
         }
 
-        let message = Message::new(FetcherMessage::Object(buf), pid.clone(), daemon_sock);
-        if let Err(e) = write_message(&mut stream, message).await {
+        let message = Message::new(FetcherMessage::Object(buf), pid.clone());
+        if let Err(e) = write_message(stream, message).await {
             warn_and_forward!("Failed to send packet to {client}: {e:?}", err);
         }
     }

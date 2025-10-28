@@ -15,13 +15,11 @@
 
 use crate::{
     daemon::{
-        broadcast_done,
-        communication::{Message, MessageCtx, Notif, ProcessMessage, send_message},
-        distribute, execute_make,
-        handlers::OutputFile,
+        MessageCtx, Notif, broadcast_done, distribute, execute_make, handlers::OutputFile,
         process_datas::ProcessDatas,
     },
     makefile::RemoteMakefile,
+    network::{Message, ProcessMessage, write_message},
 };
 use tokio::select;
 use tracing::{debug, error, info, warn};
@@ -35,27 +33,24 @@ use tracing::{debug, error, info, warn};
 /// 4. Forwards logs and handles error/cancel notifications.
 /// 5. Sends a final [`ProcessMessage::End`] to the originating client.
 #[tracing::instrument]
-pub async fn new_process(
-    MessageCtx { state, client, pid }: MessageCtx,
+pub async fn new_process<'a>(
+    MessageCtx { state, pid, stream }: MessageCtx<'a>,
     makefiles: Vec<RemoteMakefile>,
     args: Vec<String>,
 ) {
-    info!(?pid, %client, "NewProcess: starting new process handler");
+    info!("Starting new process handler");
 
-    let daemon_addr = state.daemon_sock;
+    let daemon_addr = state.daemon_sock.clone();
 
     if daemon_addr != pid.sock() {
-        warn!(
-            "NewProcess: mismatched sockets — pid.sock() = {}, daemon_sock() = {}",
-            pid.sock(),
-            daemon_addr
-        );
+        error!("Mismatched sockets");
         return;
     }
 
     // --- Step 1: Distribute remote makefiles ---
-    let involved_hosts: Vec<_> = makefiles.iter().map(|m| m.sock()).copied().collect();
-    info!(?pid, hosts = ?involved_hosts, "Distributing makefiles to involved hosts");
+    let involved_hosts: Vec<_> = makefiles.iter().map(|m| m.sock()).cloned().collect();
+
+    info!("Distributing makefiles to involved hosts");
     let process_datas = ProcessDatas::new(daemon_addr, involved_hosts.clone(), args.clone());
 
     match distribute(&state, pid.clone(), makefiles, process_datas.clone()).await {
@@ -64,13 +59,14 @@ pub async fn new_process(
             let msg = ProcessMessage::StderrLog {
                 log: format!("Dake failed to distribute makefile to remote hosts: {e:?}"),
             };
-            if let Err(e) = send_message(Message::new(msg, pid.clone(), client), client).await {
+
+            if let Err(e) = write_message(stream, Message::new(msg, pid.clone())).await {
                 warn!(?pid, error=?e, "Failed to forward distribute error to client");
             }
 
             let msg = ProcessMessage::End { exit_code: 1 };
 
-            if let Err(e) = send_message(Message::new(msg, pid.clone(), client), client).await {
+            if let Err(e) = write_message(stream, Message::new(msg, pid.clone())).await {
                 warn!(?pid, error=?e, "Failed to send end message to client");
             }
             return;
@@ -141,7 +137,7 @@ pub async fn new_process(
                             OutputFile::Stdout => ProcessMessage::StdoutLog { log: log.to_string() },
                             OutputFile::Stderr => ProcessMessage::StderrLog { log: log.to_string() },
                         };
-                        if let Err(e) = send_message(Message::new(msg, pid.clone(), client), client).await {
+                        if let Err(e) = write_message(stream, Message::new(msg, pid.clone())).await {
                             warn!(?pid, error=?e, "Failed to forward log to client");
                         }
                     }
@@ -155,11 +151,11 @@ pub async fn new_process(
     };
 
     // --- Step 4: Send final End message ---
-    let end_message = Message::new(ProcessMessage::End { exit_code }, pid.clone(), daemon_addr);
+    let end_message = Message::new(ProcessMessage::End { exit_code }, pid.clone());
 
-    match send_message(end_message, client).await {
-        Ok(_) => info!(?pid, %client, exit_code, "Sent End message to caller"),
-        Err(e) => warn!(?pid, %client, error=?e, "Failed to send End message"),
+    match write_message(stream, end_message).await {
+        Ok(_) => info!("Sent End message to caller"),
+        Err(e) => warn!("Failed to send End message: {e}"),
     }
 
     info!(?pid, "NewProcess handler completed");

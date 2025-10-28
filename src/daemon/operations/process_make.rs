@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use std::{
-    net::SocketAddr,
     path::PathBuf,
     process::{ExitStatus, Stdio},
     time::Duration,
@@ -15,10 +14,8 @@ use tokio::{
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    daemon::{
-        communication::{Message, Notif, ProcessMessage, send_message},
-        state::State,
-    },
+    daemon::{Notif, state::State},
+    network::{Message, ProcessMessage, SocketAddr, send_message},
     process_id::ProcessId,
 };
 
@@ -51,7 +48,12 @@ pub async fn execute_make(
         pid, current_dir
     );
 
-    let daemon_sock = state.daemon_sock;
+    let caller_sock = state
+        .read_process_data(&pid)
+        .await
+        .context("Failed to fetch the caller sock.")?
+        .context("Failed to fetch the caller sock, process is over.")?
+        .caller_daemon;
 
     // --- Step 1: Configure and spawn process ---
     let mut cmd = Command::new("make");
@@ -78,19 +80,18 @@ pub async fn execute_make(
         pid: ProcessId,
         pipe: R,
         make_msg: F,
-        daemon_sock: SocketAddr,
+        caller_sock: SocketAddr,
     ) -> JoinHandle<()>
     where
         R: AsyncBufRead + Unpin + Send + 'static,
         F: Fn(String) -> ProcessMessage + Send + 'static,
     {
         spawn(async move {
-            let client = daemon_sock;
             let mut lines = pipe.lines();
 
             while let Ok(Some(line)) = lines.next_line().await {
-                let msg = Message::new(make_msg(line), pid.clone(), client);
-                if let Err(e) = send_message(msg, pid.sock()).await {
+                let msg = Message::new(make_msg(line), pid.clone());
+                if let Err(e) = send_message(msg, caller_sock.clone()).await {
                     warn!("Failed to forward process log to {}: {e:?}", pid.sock());
                 }
             }
@@ -107,7 +108,7 @@ pub async fn execute_make(
             pid.clone(),
             stdout,
             |log| ProcessMessage::StdoutLog { log },
-            daemon_sock,
+            caller_sock.clone(),
         ));
     } else {
         warn!("Failed to attach stdout for process {:?}", pid);
@@ -119,7 +120,7 @@ pub async fn execute_make(
             pid.clone(),
             stderr,
             |log| ProcessMessage::StderrLog { log },
-            daemon_sock,
+            caller_sock,
         ));
     } else {
         warn!("Failed to attach stderr for process {:?}", pid);

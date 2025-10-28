@@ -1,39 +1,25 @@
-use std::net::SocketAddr;
-
-use anyhow::{Context, Result, bail};
-use tokio::net::TcpListener;
+use anyhow::{Result, bail};
 use tracing::warn;
 
 use crate::{
-    caller::utils::accept_specific_connection,
-    daemon::communication::{
-        DaemonMessage, Message, MessageKind, ProcessMessage, contact_daemon_or_start_it,
-        read_next_message,
-    },
     dec,
+    network::{
+        DaemonMessage, Message, MessageKind, ProcessMessage, Stream, read_next_message,
+        write_message,
+    },
     process_id::{ProcessId, ProjectId},
 };
 
-pub async fn fetch_fresh_id(
-    listener: &TcpListener,
-    pid: ProjectId,
-    daemon_sock: SocketAddr,
-) -> Result<ProcessId> {
-    let caller_addr = listener
-        .local_addr()
-        .context("When requesting the caller socket address")?;
-
+pub async fn fetch_fresh_id(stream: &mut Stream, pid: ProjectId) -> Result<ProcessId> {
     let default_pid = ProcessId::new_default(pid);
     let inner = DaemonMessage::FreshId;
-    let msg = Message::new(inner, default_pid, caller_addr);
+    let msg = Message::new(inner, default_pid);
 
-    contact_daemon_or_start_it(msg, daemon_sock).await?;
-
-    let mut tcp_stream = accept_specific_connection(&listener, daemon_sock.ip()).await?;
+    write_message(stream, msg).await?;
 
     let pid = loop {
         // Read next message from daemon
-        let msg = match read_next_message(&mut tcp_stream, MessageKind::ProcessMessage).await {
+        let msg = match read_next_message(stream, MessageKind::ProcessMessage).await {
             Ok(Some(msg)) => msg,
             Ok(None) => {
                 bail!("Caller connection closed naturally; Was waiting for the fresh process id.");

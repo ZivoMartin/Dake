@@ -1,13 +1,8 @@
 use anyhow::{Result, bail};
-use tokio::net::TcpListener;
-use tracing::warn;
 
 use crate::{
-    daemon::{
-        communication::{DaemonMessage, Message, send_message},
-        operations::wait_acks,
-        state::State,
-    },
+    daemon::{operations::wait_acks, state::State},
+    network::{DaemonMessage, Message, broadcast_message},
     process_id::ProcessId,
 };
 
@@ -17,18 +12,9 @@ pub async fn broadcast_done(state: &State, pid: ProcessId) -> Result<()> {
         None => bail!("The process {pid:?} is not registered."),
     };
 
-    let mut caller_sock = state.daemon_sock;
-    caller_sock.set_port(0);
+    let message = Message::new(DaemonMessage::Done, pid);
 
-    let listener = TcpListener::bind(caller_sock).await?;
-    caller_sock = listener.local_addr()?;
-
-    let msg = Message::new(DaemonMessage::Done, pid, caller_sock);
-    for sock in involved_processes.iter().copied() {
-        if let Err(e) = send_message(msg.clone(), sock).await {
-            warn!("Failed to contact {sock}, {e:?}");
-        }
-    }
-
-    wait_acks(&listener, involved_processes.len(), None).await
+    let mut streams = broadcast_message(involved_processes, message).await?;
+    let streams = streams.iter_mut().collect();
+    wait_acks(streams, None).await
 }

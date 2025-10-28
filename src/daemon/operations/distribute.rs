@@ -15,17 +15,12 @@
 
 use anyhow::Result;
 
-use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::{
-    daemon::{
-        communication::{DaemonMessage, Message, send_message},
-        operations::wait_acks::wait_acks,
-        process_datas::ProcessDatas,
-        state::State,
-    },
+    daemon::{operations::wait_acks::wait_acks, process_datas::ProcessDatas, state::State},
     makefile::RemoteMakefile,
+    network::{DaemonMessage, Message, SocketAddr, broadcast_messages},
     process_id::ProcessId,
 };
 
@@ -34,29 +29,15 @@ use crate::{
 /// - Binding or accepting sockets fails.
 /// - Sending messages to remote hosts fails.
 /// - Not all acknowledgments are received within the timeout.
+#[tracing::instrument]
 pub async fn distribute(
     state: &State,
     pid: ProcessId,
     makefiles: Vec<RemoteMakefile>,
     process_datas: ProcessDatas,
 ) -> Result<()> {
-    // Prepare a temporary listener for acknowledgments
-    let mut caller_sock = state.daemon_sock;
-    caller_sock.set_port(0);
-
-    info!("Distributer: Binding acknowledgment listener on ephemeral port");
-    let listener = TcpListener::bind(caller_sock).await?;
-    caller_sock = listener.local_addr()?;
-    info!(
-        "Distributer: Acknowledgment listener bound at {}",
-        caller_sock
-    );
-
     let host_amount = makefiles.len();
-    info!(
-        "Distributer: Preparing to distribute {} makefiles",
-        host_amount
-    );
+    info!("Preparing to distribute {} makefiles", host_amount);
 
     // Nothing to distribute
     if host_amount == 0 {
@@ -64,22 +45,26 @@ pub async fn distribute(
         return Ok(());
     }
 
-    // Send makefiles to each host
-    for makefile in makefiles {
-        let sock = *makefile.sock();
-        let message = Message::new(
-            DaemonMessage::NewMakefile {
-                makefile,
-                process_datas: process_datas.clone(),
-            },
-            pid.clone(),
-            caller_sock,
-        );
+    let socks = makefiles
+        .iter()
+        .map(|makefile| SocketAddr::from(makefile.sock().clone()))
+        .collect::<Vec<_>>();
 
-        info!("Distributer: Sending makefile to host {}", sock);
-        send_message(message, sock).await?;
-        info!("Distributer: Makefile sent successfully to {}", sock);
-    }
+    let messages = makefiles
+        .iter()
+        .cloned()
+        .map(|makefile| {
+            Message::new(
+                DaemonMessage::NewMakefile {
+                    makefile,
+                    process_datas: process_datas.clone(),
+                },
+                pid.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
 
-    wait_acks(&listener, host_amount, None).await
+    let mut streams = broadcast_messages(socks, messages).await?;
+    let streams = streams.iter_mut().collect();
+    wait_acks(streams, None).await
 }

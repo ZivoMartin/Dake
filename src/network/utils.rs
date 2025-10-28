@@ -2,61 +2,57 @@
 //!
 //! This module provides common networking utilities for the Dake distributed
 //! build system.  
-//!
-//! Responsibilities include:
-//! - Sending serialized messages to sockets
-//! - Resolving the daemon socket address
-//! - Contacting the daemon (and spawning it if necessary)
-//! - Reading incoming messages from TCP streams
-//!
-//! All operations rely on the message protocol defined in [`MessageHeader`] and
-//! [`MessageKind`].
 
 use std::{
     env::var,
-    net::{IpAddr, SocketAddr, UdpSocket},
+    io::ErrorKind,
+    net::{IpAddr, UdpSocket},
+    path::PathBuf,
     process::Command,
     time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ErrorKind},
-    net::TcpStream,
+    io::{AsyncReadExt, AsyncWriteExt},
     spawn,
     time::timeout,
 };
 use tracing::{error, info, warn};
 
 use crate::{
-    daemon::communication::{DEFAULT_PORT, Message, MessageHeader, MessageKind, MessageTrait},
     dec, enc,
     env_variables::EnvVariable,
+    network::{
+        DAEMON_UNIX_SOCKET, DEFAULT_PORT, Message, MessageHeader, MessageKind, MessageTrait,
+        SocketAddr, Stream,
+    },
     utils::get_dake_path,
 };
 
 /// Write a message on a given stream.
-pub async fn write_message<M: MessageTrait>(
-    tcp_stream: &mut TcpStream,
+pub async fn write_message<M: MessageTrait, S: AsyncWriteExt + Unpin>(
+    stream: &mut S,
     msg: Message<M>,
 ) -> Result<()> {
     let enc_msg = MessageHeader::wrap(enc!(msg)?, msg.get_kind())?;
-    tcp_stream
+    stream
         .write_all(&enc_msg)
         .await
         .context("When writing on the stream")?;
-    tcp_stream
+    stream
         .flush()
         .await
-        .context("Failed to flush on the TCP stream")
+        .context("Failed to flush on the stream")
 }
 
 /// Connect with tcp on the given socket.
-pub async fn connect(sock: SocketAddr) -> Result<TcpStream> {
+pub async fn connect(sock: SocketAddr) -> Result<Stream> {
     info!("Utils: Attempting to connect to socket {}.", sock);
-    let stream = TcpStream::connect(sock)
+    let stream = Stream::connect(sock.clone())
         .await
         .context("When connecting on the stream.")?;
+
     info!("Utils: Connected to {}", sock);
     Ok(stream)
 }
@@ -64,9 +60,9 @@ pub async fn connect(sock: SocketAddr) -> Result<TcpStream> {
 /// Sends a serialized message to the given socket.
 /// Returns the stream used to send the message.
 /// Returns an error if connection or writing fails.
-pub async fn send_message<M: MessageTrait>(msg: Message<M>, sock: SocketAddr) -> Result<TcpStream> {
+pub async fn send_message<M: MessageTrait>(msg: Message<M>, sock: SocketAddr) -> Result<Stream> {
     info!("Utils: Attempting to send a message to socket {}", sock);
-    let mut stream = connect(sock).await?;
+    let mut stream = connect(sock.clone()).await?;
     write_message(&mut stream, msg).await?;
     info!("Utils: Successfully sent message to {}", sock);
     Ok(stream)
@@ -114,76 +110,84 @@ pub fn get_daemon_ip() -> Result<IpAddr> {
         })
 }
 
-/// Returns the daemon's socket address based on environment variables
+/// Returns the daemon's TCP socket address based on environment variables
 /// or defaults. If IP is missing, returns an error.
 /// If port is missing, uses DEFAULT_PORT.
-pub fn get_daemon_sock() -> Result<SocketAddr> {
+pub fn get_daemon_tcp_sock() -> Result<SocketAddr> {
     let ip = get_daemon_ip()?;
     let port: u16 = get_daemon_port();
-    Ok(SocketAddr::new(ip, port))
+    Ok(SocketAddr::new_tcp(ip, port))
 }
 
-/// Sends a message to the daemon, starting it if not already running.
+/// Returns the daemon socket address using the DAEMON_UNIX_SOCKET constant.
+pub fn get_daemon_unix_sock() -> Result<SocketAddr> {
+    SocketAddr::new_unix(&PathBuf::from(DAEMON_UNIX_SOCKET))
+}
+
+/// Connect to the daemon, starting it if not already running.
 ///
 /// If the daemon is not active (connection refused), this function:
 /// - Spawns the daemon (`dake daemon`)
 /// - Waits up to 1s for it to start
-/// - Retries sending the message
+/// - Retries connection
 ///
 /// # Errors
 /// Returns an error if the daemon cannot be started or contacted.
 #[tracing::instrument]
-pub async fn contact_daemon_or_start_it<M: MessageTrait + 'static>(
-    msg: Message<M>,
-    daemon_addr: SocketAddr,
-) -> Result<()> {
-    if let Err(e) = send_message(msg.clone(), daemon_addr).await {
-        for cause in e.chain() {
-            if let Some(e) = cause.downcast_ref::<tokio::io::Error>() {
-                if matches!(e.kind(), ErrorKind::ConnectionRefused) {
-                    info!("Daemon not running, attempting to spawn it...");
+pub async fn connect_with_daemon_or_start_it(daemon_addr: SocketAddr) -> Result<Stream> {
+    match connect(daemon_addr.clone()).await {
+        Ok(stream) => Ok(stream),
+        Err(e) => {
+            for cause in e.chain() {
+                if let Some(e) = cause.downcast_ref::<tokio::io::Error>() {
+                    if matches!(e.kind(), ErrorKind::ConnectionRefused) {
+                        info!("Daemon not running, attempting to spawn it...");
 
-                    Command::new(
-                        get_dake_path()
-                            .context("Failed to fetch dake path when starting daemon.")?,
-                    )
-                    .arg("daemon")
-                    .spawn()
-                    .context("Failed to spawn the daemon.")?;
+                        Command::new(
+                            get_dake_path()
+                                .context("Failed to fetch dake path when starting daemon.")?,
+                        )
+                        .arg("daemon")
+                        .spawn()
+                        .context("Failed to spawn the daemon.")?;
 
-                    info!("Daemon process spawned, waiting for availability...");
+                        info!("Daemon process spawned, waiting for availability...");
 
-                    let cloned_msg = msg.clone();
-                    let message_sending = spawn(async move {
-                        while send_message(msg.clone(), daemon_addr).await.is_err() {}
-                    });
-
-                    return match timeout(Duration::from_secs(1), message_sending).await {
-                        Ok(_) => {
-                            info!("Daemon is responsive, message sent successfully");
-                            Ok(())
-                        }
-                        Err(_) => match send_message(cloned_msg, daemon_addr).await {
-                            Ok(_) => {
-                                info!("Retried and successfully sent message to daemon");
-                                Ok(())
+                        let thread_daemon_addr = daemon_addr.clone();
+                        let connections = spawn(async move {
+                            loop {
+                                if let Ok(stream) = connect(thread_daemon_addr.clone()).await {
+                                    break stream;
+                                }
                             }
-                            Err(e) => {
-                                error!(
-                                    "Utils: Failed to send message to daemon after starting it: {e}"
-                                );
-                                bail!(
-                                    "We failed to send the message to the daemon after starting it: {e}"
-                                )
+                        });
+
+                        return match timeout(Duration::from_secs(1), connections).await {
+                            Ok(Ok(stream)) => {
+                                info!("Daemon is responsive, message sent successfully");
+                                Ok(stream)
                             }
-                        },
-                    };
+                            _ => match connect(daemon_addr).await {
+                                Ok(stream) => {
+                                    info!("Retried and successfully sent message to daemon");
+                                    Ok(stream)
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "Utils: Failed to send message to daemon after starting it: {e}"
+                                    );
+                                    bail!(
+                                        "We failed to send the message to the daemon after starting it: {e}"
+                                    )
+                                }
+                            },
+                        };
+                    }
                 }
             }
+            bail!(e)
         }
-        bail!(e)
     }
-    Ok(())
 }
 
 /// Reads the next message from a TCP stream.

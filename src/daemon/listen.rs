@@ -27,19 +27,19 @@ use tracing::{info, warn};
 
 use crate::{
     daemon::{
-        communication::{
-            DAEMON_UNIX_SOCKET, DaemonMessage, Message, MessageCtx, MessageKind, get_daemon_ip,
-            get_daemon_port, read_next_message,
-        },
-        daemon_stream::DaemonStream,
         fs::init_fs,
         handlers::{
             OutputFile, handle_done, handle_error, handle_fetch, handle_fresh_request, handle_log,
             new_process, receiv_makefile,
         },
+        message_ctx::MessageCtx,
         state::State,
     },
     dec,
+    network::{
+        DAEMON_UNIX_SOCKET, DaemonMessage, Message, MessageKind, SocketAddr, Stream, get_daemon_ip,
+        get_daemon_port, read_next_message,
+    },
 };
 
 /// Starts the daemon listener.
@@ -60,9 +60,12 @@ pub async fn start() -> Result<()> {
         .await
         .context("When starting the daemon.")?;
 
-    let daemon_tcp_sock = tcp_listener
-        .local_addr()
-        .context("Failed to fetch the daemon socket from the daemon TCP listener.")?;
+    let daemon_tcp_sock = SocketAddr::from(
+        tcp_listener
+            .local_addr()
+            .context("Failed to fetch the daemon socket from the daemon TCP listener.")?,
+    );
+
     info!("Daemon started and listening on {}", daemon_tcp_sock);
 
     // Bind the daemon Unix listener socker
@@ -90,7 +93,7 @@ pub async fn start() -> Result<()> {
                 Ok((stream, addr)) => {
                     info!("TCP connection from {}", addr);
                     if tcp_tx
-                        .send((DaemonStream::Tcp(stream), addr.to_string()))
+                        .send((Stream::Tcp(stream), SocketAddr::from(addr)))
                         .await
                         .is_err()
                     {
@@ -109,10 +112,10 @@ pub async fn start() -> Result<()> {
     let unix_task = spawn(async move {
         loop {
             match unix_listener.accept().await {
-                Ok((stream, _addr)) => {
+                Ok((stream, addr)) => {
                     info!("UNIX connection accepted");
                     if unix_tx
-                        .send((DaemonStream::Unix(stream), DAEMON_UNIX_SOCKET.to_string()))
+                        .send((Stream::Unix(stream), SocketAddr::from(addr)))
                         .await
                         .is_err()
                     {
@@ -190,60 +193,51 @@ pub async fn start() -> Result<()> {
                 }
 
                 // Spawn another task for handling the specific message
-                let state = state.clone();
-                spawn(async move {
-                    let pid = message.pid.clone();
-                    let client = message.client;
-                    let ctx = MessageCtx::new(state, pid.clone(), client);
-                    match message.inner {
-                        DaemonMessage::NewProcess { makefiles, args } => {
-                            info!(
-                                "Handling NewProcess request from pid {:?}, client {}",
-                                pid, client
-                            );
-                            new_process(ctx, makefiles, args).await
-                        }
-                        DaemonMessage::NewMakefile {
-                            makefile,
-                            process_datas,
-                        } => {
-                            info!(
-                                "Handling Distribute request from pid {:?}, client {}",
-                                pid, client
-                            );
-                            receiv_makefile(ctx, makefile, process_datas).await
-                        }
-                        DaemonMessage::Fetch {
-                            target,
-                            labeled_path,
-                        } => {
-                            info!(
-                                "Handling Fetch request for target '{}' from pid {:?}, client {}",
-                                target, pid, client
-                            );
-                            handle_fetch(ctx, target, labeled_path).await
-                        }
-                        DaemonMessage::StdoutLog { log } => {
-                            info!("Handling new log from pid {pid:?}, client {client}");
-                            handle_log(ctx, log, OutputFile::Stdout).await
-                        }
-                        DaemonMessage::StderrLog { log } => {
-                            info!("Handling new err from pid {pid:?}, client {client}");
-                            handle_log(ctx, log, OutputFile::Stderr).await
-                        }
-                        DaemonMessage::MakeError {
-                            guilty_node,
-                            exit_code,
-                        } => {
-                            info!(
-                                "The process {pid:?} failed with exit code {exit_code} on {guilty_node}."
-                            );
-                            handle_error(ctx, guilty_node, exit_code).await
-                        }
-                        DaemonMessage::Done => handle_done(ctx).await,
-                        DaemonMessage::FreshId => handle_fresh_request(ctx).await,
+                let pid = message.pid.clone();
+                let ctx = MessageCtx::new(&mut stream, state.clone(), pid.clone());
+
+                match message.inner {
+                    DaemonMessage::NewProcess { makefiles, args } => {
+                        info!("Handling NewProcess request from pid {:?}", pid);
+                        new_process(ctx, makefiles, args).await
                     }
-                });
+                    DaemonMessage::NewMakefile {
+                        makefile,
+                        process_datas,
+                    } => {
+                        info!("Handling Distribute request from pid {:?}", pid);
+                        receiv_makefile(ctx, makefile, process_datas).await
+                    }
+                    DaemonMessage::Fetch {
+                        target,
+                        labeled_path,
+                    } => {
+                        info!(
+                            "Handling Fetch request for target '{}' from pid {:?}",
+                            target, pid
+                        );
+                        handle_fetch(ctx, target, labeled_path).await
+                    }
+                    DaemonMessage::StdoutLog { log } => {
+                        info!("Handling new log from pid {pid:?}");
+                        handle_log(ctx, log, OutputFile::Stdout).await
+                    }
+                    DaemonMessage::StderrLog { log } => {
+                        info!("Handling new err from pid {pid:?}");
+                        handle_log(ctx, log, OutputFile::Stderr).await
+                    }
+                    DaemonMessage::MakeError {
+                        guilty_node,
+                        exit_code,
+                    } => {
+                        info!(
+                            "The process {pid:?} failed with exit code {exit_code} on {guilty_node}."
+                        );
+                        handle_error(ctx, guilty_node, exit_code).await
+                    }
+                    DaemonMessage::Done => handle_done(ctx).await,
+                    DaemonMessage::FreshId => handle_fresh_request(ctx).await,
+                }
             }
             info!("Daemon task for {} terminated", addr);
         });

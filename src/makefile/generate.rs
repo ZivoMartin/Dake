@@ -9,11 +9,11 @@
 use crate::{
     lexer::{Directive, TargetLabel, Token},
     makefile::{RemoteMakefile, RemoteMakefileSet},
+    network::SocketAddr,
     process_id::ProcessId,
 };
 use std::{
     collections::{HashMap, HashSet},
-    net::IpAddr,
     path::PathBuf,
 };
 use tracing::{info, warn};
@@ -39,28 +39,29 @@ impl RemoteMakefileSet {
         );
 
         let mut full_fetch_makefile = String::new();
-        let mut saw_ips = HashSet::from([pid.ip()]);
+        let mut saw_ips = HashSet::from([pid.sock()]);
         let mut makefiles = vec![RemoteMakefile::new(String::new(), pid.sock())];
-        let mut root_path_set = HashMap::from([(pid.ip(), pid.path().clone())]);
+        let mut root_path_set = HashMap::from([(pid.sock(), pid.path().clone())]);
 
         // Utility closure to construct fetch commands
-        let get_fetch_command = |root_path_set: &HashMap<IpAddr, PathBuf>,
+        let get_fetch_command = |root_path_set: &HashMap<SocketAddr, PathBuf>,
                                  label: TargetLabel,
                                  target: String|
          -> String {
             let path = match label.path {
                 Some(path) => format!("--labeled-path {}", path.display()),
-                None => match root_path_set.get(&label.ip()) {
+                None => match root_path_set.get(&label.sock) {
                     Some(path) => format!("--labeled-path {}", path.display()),
                     None => String::new(),
                 },
             };
             format!(
-                "{} fetch \"{}\" {} {} {path} \"{target}\"\n",
-                dake_path.display(),
-                pid.path().display(),
-                pid.id(),
-                label.sock
+                "{binary} fetch \"{project_path}\" \"{project_sock}\" {process_id} {label_sock} {path} \"{target}\"\n",
+                binary = dake_path.display(),
+                project_path = pid.path().display(),
+                project_sock = pid.sock().to_string(),
+                process_id = pid.id(),
+                label_sock = label.sock
             )
         };
 
@@ -88,12 +89,15 @@ impl RemoteMakefileSet {
                     );
 
                     // Add a new makefile for this IP if not already seen
-                    if saw_ips.insert(label.ip()) {
+                    if saw_ips.insert(label.sock.clone()) {
                         info!(
-                            "RemoteMakefileSet: Adding new RemoteMakefile for ip {}",
-                            label.ip()
+                            "RemoteMakefileSet: Adding new RemoteMakefile for sock {}",
+                            label.sock
                         );
-                        makefiles.push(RemoteMakefile::new(full_fetch_makefile.clone(), label.sock))
+                        makefiles.push(RemoteMakefile::new(
+                            full_fetch_makefile.clone(),
+                            label.sock.clone(),
+                        ))
                     }
 
                     // Build fetch and default rules
@@ -120,7 +124,7 @@ impl RemoteMakefileSet {
                             "RemoteMakefileSet: Registered RootDef ip={}, path={:?}",
                             ip, path
                         );
-                        root_path_set.insert(ip, path);
+                        root_path_set.insert(SocketAddr::new_tcp(ip, 0), path);
                     }
                 },
             }

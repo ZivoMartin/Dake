@@ -1,7 +1,9 @@
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 
 use derive_getters::Getters;
 use serde::{Deserialize, Serialize};
+
+use crate::network::SocketAddr;
 
 #[derive(Getters, Clone, Serialize, Deserialize, Debug)]
 pub struct RemoteMakefile {
@@ -14,10 +16,6 @@ impl RemoteMakefile {
         RemoteMakefile { makefile, sock }
     }
 
-    pub fn ip(&self) -> IpAddr {
-        self.sock.ip()
-    }
-
     pub fn set_sock(&mut self, sock: SocketAddr) {
         self.sock = sock
     }
@@ -28,5 +26,9 @@ impl RemoteMakefile {
 
     pub fn drop_makefile(self) -> String {
         self.makefile
+    }
+
+    pub fn ip(&self) -> Option<IpAddr> {
+        self.sock.ip()
     }
 }

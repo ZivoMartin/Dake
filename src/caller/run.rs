@@ -4,28 +4,22 @@
 //! current directory. It parses the Makefile, generates distributed makefiles,
 //! contacts the daemon, and waits for build completion.
 //!
-//! The caller:
-//! - Parses and rewrites the local Makefile into a temporary `dake_tmp_makefile`
-//! - Connects to the daemon, sending a [`DaemonMessage::NewProcess`] request
-//! - Waits for a [`ProcessMessage::End`] from the daemon before returning
-//!
 //! This module acts as the entrypoint for distributed builds when the user
 //! executes `dake <make-args>`.
 
 use std::{env::current_dir, fs::write};
 
-use anyhow::{Context, Result};
-use tokio::{fs::remove_file, net::TcpListener};
-use tracing::info;
-
 use crate::{
     caller::{fetch_id::fetch_fresh_id, start::start},
-    daemon::communication::get_daemon_sock,
     lexer::guess_path_and_lex,
     makefile::RemoteMakefileSet,
+    network::{connect_with_daemon_or_start_it, get_daemon_tcp_sock, get_daemon_unix_sock},
     process_id::ProjectId,
     utils::get_dake_path,
 };
+use anyhow::{Context, Result};
+use tokio::fs::remove_file;
+use tracing::info;
 
 /// Name of the temporary makefile generated for the local build.
 const TMP_MAKEFILE_NAME: &'static str = "dake_tmp_makefile";
@@ -33,7 +27,9 @@ const TMP_MAKEFILE_NAME: &'static str = "dake_tmp_makefile";
 /// Initiates a distributed build request.
 #[tracing::instrument]
 pub async fn make(mut args: Vec<String>) -> Result<i32> {
-    let daemon_sock = get_daemon_sock()?;
+    let daemon_unix_sock = get_daemon_unix_sock()?;
+    let daemon_tcp_sock = get_daemon_tcp_sock()?;
+
     let caller_dir = current_dir()?;
     info!("Caller started in directory: {:?}", caller_dir);
 
@@ -42,21 +38,18 @@ pub async fn make(mut args: Vec<String>) -> Result<i32> {
     let tokens = guess_path_and_lex()?;
     info!("Successfully lexed Makefile into {} tokens", tokens.len());
 
-    // Step 2: Init TCP
-    info!("Connecting on TCP");
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .context("When starting the caller socket.")?;
+    // Step 2: Connecting with daemon
+    let mut stream = connect_with_daemon_or_start_it(daemon_unix_sock).await?;
 
     // Step 3: Fetch a fresh process id
-    let project_id = ProjectId::new(daemon_sock, caller_dir.clone());
+    let project_id = ProjectId::new(daemon_tcp_sock, caller_dir.clone());
 
     info!("Fetching pid for project {project_id:?}.");
-    let pid = fetch_fresh_id(&listener, project_id, daemon_sock).await?;
+    let pid = fetch_fresh_id(&mut stream, project_id).await?;
 
     // Step 4: Generate makefiles
     let makefiles = RemoteMakefileSet::generate(tokens, pid.clone(), get_dake_path()?);
-    info!("Generated RemoteMakefileSet for daemon at {}", daemon_sock);
+    info!("Generated RemoteMakefileSet for daemon");
 
     write(TMP_MAKEFILE_NAME, makefiles.my_makefile())
         .context("Failed to write temporary dake makefile")?;
@@ -70,7 +63,7 @@ pub async fn make(mut args: Vec<String>) -> Result<i32> {
     info!("Arguments for make prepared: {:?}", args);
 
     // Step 6: Starting the process.
-    let exit_code = start(&listener, pid, makefiles, args, daemon_sock).await?;
+    let exit_code = start(&mut stream, pid, makefiles, args).await?;
 
     remove_file(TMP_MAKEFILE_NAME)
         .await

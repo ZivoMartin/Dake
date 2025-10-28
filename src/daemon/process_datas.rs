@@ -1,6 +1,6 @@
-use std::net::SocketAddr;
-
 use serde::{Deserialize, Serialize};
+
+use crate::network::SocketAddr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessDatas {

@@ -1,28 +1,22 @@
 use tracing::{error, info, warn};
 
 use crate::{
-    daemon::{
-        communication::{AckMessage, Message, MessageCtx, send_message},
-        fs::push_makefile,
-        process_datas::ProcessDatas,
-    },
+    daemon::{MessageCtx, fs::push_makefile, process_datas::ProcessDatas},
     makefile::RemoteMakefile,
+    network::{AckMessage, Message, write_message},
 };
 
 /// Receives a remote makefile, writes it to disk, and replies with an acknowledgment.
 #[tracing::instrument]
-pub async fn receiv_makefile(
-    MessageCtx { pid, client, state }: MessageCtx,
+pub async fn receiv_makefile<'a>(
+    MessageCtx { pid, stream, state }: MessageCtx<'a>,
     makefile: RemoteMakefile,
     process_datas: ProcessDatas,
 ) {
-    info!(
-        "Receiver: Handling incoming makefile for pid {:?} from client {}",
-        pid, client
-    );
+    info!("Handling incoming makefile");
 
     // Closure to simplify message creation with same pid and client
-    let message = |inner| Message::new(inner, pid.clone(), client);
+    let message = |inner| Message::new(inner, pid.clone());
 
     // Registering the new makefile in the shared database
     state.register_process(pid.clone(), process_datas).await;
@@ -30,34 +24,22 @@ pub async fn receiv_makefile(
     // Attempt to persist makefile
     match push_makefile(&makefile, &pid) {
         Ok(_) => {
-            info!(
-                "Receiver: Successfully persisted makefile for pid {:?}, sending Ack to {}",
-                pid, client
-            );
-            if let Err(e) = send_message(message(AckMessage::Ok), client).await {
-                warn!(
-                    "Receiver: Failed to send Ack to distributor {} for pid {:?}: {e}",
-                    client, pid
-                );
+            info!("Successfully persisted makefile for pid {pid:?}, sending Ack");
+            if let Err(e) = write_message(stream, message(AckMessage::Ok)).await {
+                warn!("Failed to send Ack to distributor for pid {:?}: {e}", pid);
             } else {
-                info!("Receiver: Ack successfully sent to {}", client);
+                info!("Ack successfully sent.");
             }
         }
         Err(e) => {
-            error!(
-                "Receiver: Failed to persist makefile for pid {:?}: {e}",
-                pid
-            );
-            if let Err(e) = send_message(message(AckMessage::Failure), client).await {
+            error!("Failed to persist makefile for pid {:?}: {e}", pid);
+            if let Err(e) = write_message(stream, message(AckMessage::Failure)).await {
                 warn!(
-                    "Receiver: Failed to send Fail message to distributor {} for pid {:?}: {e}",
-                    client, pid
+                    "Failed to send Fail message to distributor for pid {:?}: {e}",
+                    pid
                 );
             } else {
-                info!(
-                    "Receiver: Failure message sent to distributor {} for pid {:?}",
-                    client, pid
-                );
+                info!("Failure message sent to distributor for pid {:?}", pid);
             }
         }
     }

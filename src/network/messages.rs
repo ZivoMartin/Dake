@@ -6,13 +6,14 @@
 //! Messages are serialized with `bincode` and transmitted across TCP sockets
 //! between the daemon, caller, distributor, and fetcher components.
 
-use std::{fmt::Debug, net::SocketAddr, path::PathBuf};
+use std::{fmt::Debug, path::PathBuf};
 
 use anyhow::Result;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    daemon::process_datas::ProcessDatas, enc, makefile::RemoteMakefile, process_id::ProcessId,
+    daemon::ProcessDatas, enc, makefile::RemoteMakefile, network::SocketAddr, process_id::ProcessId,
 };
 
 /// A trait implemented by all message types.
@@ -54,6 +55,8 @@ pub enum MessageKind {
     FetcherMessage,
 }
 
+static HEADER_LENGTH: OnceCell<usize> = OnceCell::new();
+
 impl MessageHeader {
     /// Creates a new [`MessageHeader`].
     pub fn new(size: u64, kind: MessageKind) -> Self {
@@ -62,7 +65,9 @@ impl MessageHeader {
 
     /// Returns the serialized length of a default message header.
     pub fn get_header_length() -> Result<usize> {
-        Ok(enc!(MessageHeader::default())?.len())
+        HEADER_LENGTH
+            .get_or_try_init(|| Ok(enc!(MessageHeader::default())?.len()))
+            .map(|len| *len)
     }
 
     /// Prepends a serialized header to a message payload.
@@ -83,7 +88,7 @@ impl MessageHeader {
 /// Each message contains:
 /// - `inner`: The actual message payload (implements [`MessageTrait`])
 /// - `pid`: The [`ProcessId`] of the sender
-/// - `client`: The socket of the sender
+/// - `client`: The socket of the sender, if none then reuse the same stream
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Message<M: MessageTrait> {
     /// The actual message payload.
@@ -91,15 +96,12 @@ pub struct Message<M: MessageTrait> {
 
     /// The process identifier of the sender.
     pub pid: ProcessId,
-
-    /// The client socket associated with this message.
-    pub client: SocketAddr,
 }
 
 impl<M: MessageTrait> Message<M> {
     /// Constructs a new [`Message`] with the given payload, process, and client.
-    pub fn new(inner: M, pid: ProcessId, client: SocketAddr) -> Self {
-        Self { inner, pid, client }
+    pub fn new(inner: M, pid: ProcessId) -> Self {
+        Self { inner, pid }
     }
 
     /// Returns the [`MessageKind`] of the contained payload.

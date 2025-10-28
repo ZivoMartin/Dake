@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use tracing::warn;
 
-use crate::daemon::communication::{MessageCtx, Notif};
+use crate::daemon::{MessageCtx, Notif};
 
 #[derive(Debug)]
 pub enum OutputFile {
@@ -11,8 +11,8 @@ pub enum OutputFile {
 }
 
 #[tracing::instrument]
-pub async fn handle_log(
-    MessageCtx { pid, state, .. }: MessageCtx,
+pub async fn handle_log<'a>(
+    MessageCtx { pid, state, .. }: MessageCtx<'a>,
     log: String,
     output: OutputFile,
 ) {

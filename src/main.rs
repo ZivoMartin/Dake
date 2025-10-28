@@ -7,12 +7,12 @@
 //! - **Fetch**: request a build artifact from a remote daemon.
 //! - **Daemon**: start the local build daemon that listens for requests.
 //! - **Caller**: intercept and run a `make` process, potentially distributed.
+//! - **Clean**: clean the dake workspace
 //!
 //! The CLI also ensures logging is initialized and provides help output if no
 //! command is supplied.
 
 use std::{
-    net::SocketAddr,
     path::PathBuf,
     process::{ExitCode, exit},
 };
@@ -22,6 +22,7 @@ use dake::{
     caller,
     daemon::{self, fs},
     fetch,
+    network::SocketAddr,
 };
 use tracing::info;
 
@@ -48,6 +49,9 @@ enum Commands {
     Fetch {
         /// Path of the caller working directory
         caller_path: PathBuf,
+
+        /// Socket of the caller
+        caller_sock: SocketAddr,
 
         /// Id of the process used in the pid
         id: u64,
@@ -85,12 +89,13 @@ async fn main() -> anyhow::Result<ExitCode> {
         Some(Commands::Fetch {
             target,
             caller_path,
+            caller_sock,
             id,
             labeled_path,
             sock,
         }) => {
             info!("Executing Fetch command for target '{target}' with socket {sock}");
-            fetch::fetch(target, labeled_path, caller_path, id, sock).await?;
+            fetch::fetch(target, labeled_path, caller_path, caller_sock, id, sock).await?;
             0
         }
 

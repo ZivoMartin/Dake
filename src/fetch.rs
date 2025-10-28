@@ -1,20 +1,20 @@
 use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
-    net::SocketAddr,
     path::PathBuf,
     time::Duration,
 };
 
 use anyhow::{Context, Result};
-use tokio::{net::TcpListener, time::sleep};
+use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    daemon::communication::{
-        DaemonMessage, FetcherMessage, Message, MessageKind, read_next_message, send_message,
-    },
     dec,
+    network::{
+        DaemonMessage, FetcherMessage, Message, MessageKind, SocketAddr, connect,
+        read_next_message, write_message,
+    },
     process_id::ProcessId,
 };
 
@@ -30,24 +30,24 @@ use crate::{
 /// # Notes
 /// This function does not stop on daemon-side errors immediately — it may wait
 /// after a `FetcherMessage::Failed` to allow parent synchronization.
+#[tracing::instrument]
 pub async fn fetch(
     target: String,
     labeled_path: Option<PathBuf>,
     caller_path: PathBuf,
+    caller_sock: SocketAddr,
     id: u64,
     sock: SocketAddr,
 ) -> Result<()> {
-    let pid = ProcessId::new(id, sock, caller_path);
+    let pid = ProcessId::new(id, sock.clone(), caller_path);
     info!("Fetcher started for target '{}' with PID {:?}", target, pid);
 
-    // --- Step 1: Bind temporary listener for fetcher responses ---
-    let listener = TcpListener::bind("127.0.0.1:0")
+    // --- Step 1: Connect to remote daemon ---
+    info!("Connecting with the daemon...");
+    let mut stream = connect(caller_sock)
         .await
-        .context("Failed to start the fetcher listener socket")?;
-    let fetcher_addr = listener
-        .local_addr()
-        .context("Failed to retrieve fetcher socket address")?;
-    info!("Fetcher listening for responses on {}", fetcher_addr);
+        .context("Failed to connect with the daemon.")?;
+    info!("Connected successfully.");
 
     // --- Step 2: Send Fetch request to remote daemon ---
     let fetch_message = Message::new(
@@ -56,11 +56,10 @@ pub async fn fetch(
             labeled_path,
         },
         pid.clone(),
-        fetcher_addr,
     );
 
     info!("Sending Fetch request for '{}' to {}", target, sock);
-    send_message(fetch_message, sock)
+    write_message(&mut stream, fetch_message)
         .await
         .with_context(|| format!("Failed to send Fetch request for '{target}' to {sock}"))?;
     info!(
@@ -68,27 +67,7 @@ pub async fn fetch(
         target, sock
     );
 
-    // --- Step 3: Wait for daemon connection ---
-    let mut tcp_stream = loop {
-        match listener.accept().await {
-            Ok((stream, remote_sock)) => {
-                if remote_sock.ip() == sock.ip() {
-                    info!("Accepted connection from expected daemon {}", remote_sock);
-                    break stream;
-                } else {
-                    warn!(
-                        "Unexpected connection: expected {}, got {} — ignoring",
-                        sock, remote_sock
-                    );
-                }
-            }
-            Err(e) => {
-                warn!("Failed to accept connection on fetcher listener: {e:?}");
-            }
-        }
-    };
-
-    // --- Step 4: Receive all messages and write object to file ---
+    // --- Step 3: Receive all messages and write object to file ---
     let file_path = PathBuf::from(&target);
     debug!("Opening output file at {:?}", file_path);
 
@@ -103,7 +82,7 @@ pub async fn fetch(
     info!("Waiting for object data from daemon {}", sock);
 
     loop {
-        let msg = match read_next_message(&mut tcp_stream, MessageKind::FetcherMessage).await {
+        let msg = match read_next_message(&mut stream, MessageKind::FetcherMessage).await {
             Ok(Some(raw_msg)) => {
                 debug!("Received raw FetcherMessage from {}", sock);
                 raw_msg

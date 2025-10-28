@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter},
-    net::SocketAddr,
     sync::Arc,
     time::Duration,
 };
@@ -13,7 +12,8 @@ use tokio::{select, sync::Mutex, time::sleep};
 use tracing::{info, warn};
 
 use crate::{
-    daemon::{communication::Notif, process_datas::ProcessDatas},
+    daemon::{Notif, process_datas::ProcessDatas},
+    network::SocketAddr,
     process_id::{ProcessId, ProjectId},
 };
 
