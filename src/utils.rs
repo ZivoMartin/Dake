@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
-use std::env::var;
 use std::path::PathBuf;
+use std::{env::var, path::Path};
 use tracing::{error, info};
 use which::which;
 
@@ -13,11 +13,18 @@ pub fn get_dake_path() -> Result<PathBuf> {
 
     // Retrieve environment variable or fall back to defaults
     let path_str = var(EnvVariable::BinaryPath.to_string()).unwrap_or_else(|_| {
-        if cfg!(debug_assertions) {
-            "target/debug/dake".to_string()
-        } else {
-            "dake".to_string()
-        }
+        let p = format!(
+            "target/{}/dake",
+            if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
+            }
+        );
+        Path::new(&p)
+            .exists()
+            .then(|| p)
+            .unwrap_or_else(|| "dake".to_string())
     });
 
     info!("Raw path string resolved to '{}'", path_str);
