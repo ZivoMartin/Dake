@@ -61,7 +61,6 @@ impl FromStr for TargetLabel {
 
         Ok(match s.rsplit_once('|') {
             Some((sock, path)) => {
-                println!("{sock} {path}");
                 let addr = parse_sock(sock)?;
 
                 let path_buf: PathBuf = path.parse()?;
@@ -72,7 +71,6 @@ impl FromStr for TargetLabel {
                 TargetLabel::new(addr, Some(path_buf))
             }
             None => {
-                println!("{s}");
                 let addr = parse_sock(s)?;
                 info!("TargetLabel: Parsed '{}' into addr={}, no path", s, addr);
                 TargetLabel::new(addr, None)

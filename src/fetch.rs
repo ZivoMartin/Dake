@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::{
     dec,
@@ -69,7 +69,7 @@ pub async fn fetch(
 
     // --- Step 3: Receive all messages and write object to file ---
     let file_path = PathBuf::from(&target);
-    debug!("Opening output file at {:?}", file_path);
+    info!("Opening output file at {:?}", file_path);
 
     let file = OpenOptions::new()
         .create(true)
@@ -84,7 +84,7 @@ pub async fn fetch(
     loop {
         let msg = match read_next_message(&mut stream, MessageKind::FetcherMessage).await {
             Ok(Some(raw_msg)) => {
-                debug!("Received raw FetcherMessage from {}", sock);
+                info!("Received raw FetcherMessage from {}", sock);
                 raw_msg
             }
             Ok(None) => {
@@ -103,7 +103,7 @@ pub async fn fetch(
         let msg: FetcherMessage = dec!(msg)?;
         match msg {
             FetcherMessage::Object(obj) => {
-                debug!("Writing {} bytes from object chunk to file", obj.len());
+                info!("Writing {} bytes from object chunk to file", obj.len());
                 writer
                     .write_all(&obj)
                     .with_context(|| format!("Failed writing object data for target '{target}'"))?;

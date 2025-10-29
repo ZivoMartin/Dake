@@ -1,6 +1,7 @@
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use tracing::{debug, warn};
+use std::{fmt, path::PathBuf, str::FromStr};
+use tracing::{info, warn};
 
 use crate::network::SocketAddr;
 
@@ -16,7 +17,7 @@ impl ProcessId {
     /// Creates a process ID with the default numeric value (0).
     /// This is typically used for uninitialized or placeholder processes.
     pub fn new_default(project_id: ProjectId) -> Self {
-        debug!(
+        info!(
             "Creating default ProcessId (id = 0) for project {:?}",
             project_id
         );
@@ -25,7 +26,7 @@ impl ProcessId {
 
     /// Creates a new [`ProcessId`] using an ID, socket address, and file path.
     pub fn new(id: u64, sock: SocketAddr, path: PathBuf) -> Self {
-        debug!(
+        info!(
             "Creating ProcessId with id={} from socket {:?} and path {:?}",
             id, sock, path
         );
@@ -67,7 +68,7 @@ pub struct ProjectId {
 impl ProjectId {
     /// Creates a new project identifier from a socket and file path.
     pub fn new(sock: SocketAddr, path: PathBuf) -> Self {
-        debug!(
+        info!(
             "Creating ProjectId with socket {:?} and path {:?}",
             sock, path
         );
@@ -80,5 +81,53 @@ impl ProjectId {
         }
 
         Self { sock, path }
+    }
+}
+
+impl fmt::Display for ProjectId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}|{}", self.sock, self.path.display())
+    }
+}
+
+impl FromStr for ProjectId {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let (sock_str, path_str) = s
+            .split_once('|')
+            .ok_or_else(|| anyhow!("invalid ProjectId format, expected '<sock>|<path>'"))?;
+
+        let sock: SocketAddr = sock_str
+            .parse()
+            .map_err(|e| anyhow!("invalid socket in ProjectId: {e}"))?;
+
+        let path = PathBuf::from(path_str);
+
+        Ok(ProjectId { sock, path })
+    }
+}
+
+impl fmt::Display for ProcessId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}@{}", self.id, self.project_id)
+    }
+}
+
+impl FromStr for ProcessId {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let (id_str, project_str) = s
+            .split_once('@')
+            .ok_or_else(|| anyhow!("invalid ProcessId format, expected '<id>@<project_id>'"))?;
+
+        let id: u64 = id_str
+            .parse()
+            .map_err(|e| anyhow!("invalid process id: {e}"))?;
+
+        let project_id: ProjectId = project_str.parse()?;
+
+        Ok(ProcessId { id, project_id })
     }
 }

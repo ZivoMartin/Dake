@@ -3,14 +3,14 @@
 //! This module defines the **message protocol** used in the Dake distributed
 //! build system.  
 //!
-//! Messages are serialized with `bincode` and transmitted across TCP sockets
+//! Messages are serialized with `postcard` and transmitted across TCP sockets
 //! between the daemon, caller, distributor, and fetcher components.
 
 use std::{fmt::Debug, path::PathBuf};
 
 use anyhow::Result;
 use once_cell::sync::OnceCell;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     daemon::ProcessDatas, enc, makefile::RemoteMakefile, network::SocketAddr, process_id::ProcessId,
@@ -29,7 +29,7 @@ pub trait MessageTrait: Clone + Serialize + Send + Debug {
 /// Contains:
 /// - `size`: Length of the serialized payload (in bytes)
 /// - `kind`: The [`MessageKind`] of the message
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct MessageHeader {
     /// Size of the message payload in bytes.
     pub size: u64,
@@ -38,7 +38,47 @@ pub struct MessageHeader {
     pub kind: MessageKind,
 }
 
+impl Serialize for MessageHeader {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut buf = [0u8; MessageHeader::SIZE];
+        buf[..8].copy_from_slice(&self.size.to_le_bytes());
+        buf[8] = self.kind as u8;
+        serializer.serialize_bytes(&buf)
+    }
+}
+
+impl<'de> Deserialize<'de> for MessageHeader {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes: &[u8] = Deserialize::deserialize(deserializer)?;
+        if bytes.len() != MessageHeader::SIZE {
+            return Err(serde::de::Error::custom(format!(
+                "invalid header length: expected {} bytes, got {}",
+                MessageHeader::SIZE,
+                bytes.len()
+            )));
+        }
+
+        let size = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+        let kind = match bytes[8] {
+            0 => MessageKind::DaemonMessage,
+            1 => MessageKind::ProcessMessage,
+            2 => MessageKind::AckMessage,
+            3 => MessageKind::FetcherMessage,
+            other => return Err(serde::de::Error::custom(format!("invalid kind: {}", other))),
+        };
+
+        Ok(Self { size, kind })
+    }
+}
+
 /// Discriminator for all supported message categories.
+#[repr(u8)]
 #[derive(Serialize, Deserialize, Default, Eq, PartialEq, Debug, Copy, Clone)]
 pub enum MessageKind {
     /// Message coming from or for the daemon.
@@ -58,6 +98,8 @@ pub enum MessageKind {
 static HEADER_LENGTH: OnceCell<usize> = OnceCell::new();
 
 impl MessageHeader {
+    const SIZE: usize = 9;
+
     /// Creates a new [`MessageHeader`].
     pub fn new(size: u64, kind: MessageKind) -> Self {
         Self { size, kind }

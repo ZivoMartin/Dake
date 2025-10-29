@@ -58,13 +58,21 @@ impl State {
         }
     }
 
-    pub async fn register_process(&self, pid: ProcessId, datas: ProcessDatas) {
-        info!("Registering new process {datas:?} the pid {pid:?}.");
+    // Register the process in the database with a default ProcessData value
+    pub async fn register_process(&self, pid: ProcessId) {
+        info!("Registering new process {pid:?}.");
+        self.set_process_datas(pid.clone(), ProcessDatas::default())
+            .await;
+        info!("{pid:?} has been registered.");
+    }
+
+    pub async fn set_process_datas(&self, pid: ProcessId, datas: ProcessDatas) {
+        info!("Setting process datas {datas:?} for process {pid:?}.");
         let processes = self.processes.clone();
         let sleep_fut = Box::pin(sleep(Duration::from_secs(5)));
         select! {
             _ = sleep_fut => {
-                warn!("Failed to lock processes database, {datas:?} will not be registered for {pid:?}")
+                warn!("Failed to lock processes database")
             }
             mut processes = processes.lock() => {
                 processes.insert(pid.clone(), datas.clone());

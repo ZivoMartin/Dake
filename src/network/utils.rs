@@ -35,7 +35,10 @@ pub async fn write_message<M: MessageTrait, S: AsyncWriteExt + Unpin>(
     stream: &mut S,
     msg: Message<M>,
 ) -> Result<()> {
-    let enc_msg = MessageHeader::wrap(enc!(msg)?, msg.get_kind())?;
+    info!("Writing a new message : {:?}", msg.get_kind());
+
+    let enc_msg = MessageHeader::wrap(enc!(msg)?, msg.get_kind())
+        .context("Failed to compute the message header.")?;
     stream
         .write_all(&enc_msg)
         .await
@@ -121,7 +124,7 @@ pub fn get_daemon_tcp_sock() -> Result<SocketAddr> {
 
 /// Returns the daemon socket address using the DAEMON_UNIX_SOCKET constant.
 pub fn get_daemon_unix_sock() -> Result<SocketAddr> {
-    SocketAddr::new_unix(&PathBuf::from(DAEMON_UNIX_SOCKET))
+    SocketAddr::new_unix(PathBuf::from(DAEMON_UNIX_SOCKET))
 }
 
 /// Connect to the daemon, starting it if not already running.
@@ -140,7 +143,7 @@ pub async fn connect_with_daemon_or_start_it(daemon_addr: SocketAddr) -> Result<
         Err(e) => {
             for cause in e.chain() {
                 if let Some(e) = cause.downcast_ref::<tokio::io::Error>() {
-                    if matches!(e.kind(), ErrorKind::ConnectionRefused) {
+                    if matches!(e.kind(), ErrorKind::ConnectionRefused | ErrorKind::NotFound) {
                         info!("Daemon not running, attempting to spawn it...");
 
                         Command::new(
@@ -164,24 +167,24 @@ pub async fn connect_with_daemon_or_start_it(daemon_addr: SocketAddr) -> Result<
 
                         return match timeout(Duration::from_secs(1), connections).await {
                             Ok(Ok(stream)) => {
-                                info!("Daemon is responsive, message sent successfully");
+                                info!("Daemon is responsive, connected successfully");
                                 Ok(stream)
                             }
                             _ => match connect(daemon_addr).await {
                                 Ok(stream) => {
-                                    info!("Retried and successfully sent message to daemon");
+                                    info!("Retried and successfully connected to the daemon");
                                     Ok(stream)
                                 }
                                 Err(e) => {
                                     error!(
-                                        "Utils: Failed to send message to daemon after starting it: {e}"
+                                        "Failed to connect to the daemon after starting it: {e}"
                                     );
-                                    bail!(
-                                        "We failed to send the message to the daemon after starting it: {e}"
-                                    )
+                                    bail!("Failed to connect to the daemon after starting it: {e}")
                                 }
                             },
                         };
+                    } else {
+                        warn!("Failed to connect to daemon for a non expected reason: {e:?}");
                     }
                 }
             }
@@ -212,7 +215,8 @@ pub async fn read_next_message<S: AsyncReadExt + Unpin>(
     stream: &mut S,
     kind: MessageKind,
 ) -> Result<Option<Vec<u8>>> {
-    let header_length = MessageHeader::get_header_length()?;
+    let header_length =
+        MessageHeader::get_header_length().context("Failed to compute header length.")?;
     let mut header = vec![0; header_length];
 
     // Read message header
@@ -220,8 +224,10 @@ pub async fn read_next_message<S: AsyncReadExt + Unpin>(
         info!("Connection closed while trying to read header");
         return Ok(None);
     }
+    info!("Just read a new message on the stream.");
 
-    let header: MessageHeader = dec!(header)?;
+    let header: MessageHeader = dec!(header).context("Failed to decode the MessageHeader.")?;
+
     info!(
         "Utils: Received message header with size={} and kind={:?}",
         header.size, header.kind

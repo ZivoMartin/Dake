@@ -6,8 +6,8 @@ use anyhow::Result;
 use crate::common::cluster::{clean_cluster, setup_cluster};
 
 const MAKEFILE: &'static str = "
-#!ROOT_DEF $NODE-2 = /project
-#!ROOT_DEF NODE-3 = /project
+#!ROOT_DEF NODE-1 = /project
+#!ROOT_DEF NODE-2 = /project
 
 main: main.o a.o b.o c.o
 	$(CC) -o main main.o a.o b.o c.o
@@ -15,13 +15,13 @@ main: main.o a.o b.o c.o
 main.o: main.c
 	$(CC) -c main.c
 
-a.o[$NODE-2]: a.c
+a.o[NODE-1]: a.c
 	$(CC) -c a.c -o a.o
 
-b.o[NODE-3]: b.c
+b.o[NODE-2]: b.c
 	$(CC) -c b.c -o b.o
 
-c.o[NODE-3]: c.c
+c.o[NODE-2]: c.c
 	$(CC) -c c.c -o c.o
 ";
 
@@ -55,7 +55,7 @@ async fn test_basic_build() -> Result<()> {
     cluster.push_files(files, &dest_path).await?;
 
     cluster
-        .start_dake(&cluster.nodes[0], PathBuf::from("test_basic"))
+        .start_dake(dest_path, &cluster.nodes[0], PathBuf::from("test_basic"))
         .await?;
 
     clean_cluster().await?;

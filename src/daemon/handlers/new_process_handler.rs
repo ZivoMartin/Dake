@@ -22,7 +22,7 @@ use crate::{
     network::{Message, ProcessMessage, write_message},
 };
 use tokio::select;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Handles the creation and supervision of a new distributed `make` process.
 ///
@@ -32,7 +32,7 @@ use tracing::{debug, error, info, warn};
 /// 3. Spawns and monitors the local `make` process.
 /// 4. Forwards logs and handles error/cancel notifications.
 /// 5. Sends a final [`ProcessMessage::End`] to the originating client.
-#[tracing::instrument]
+#[tracing::instrument(skip(state, stream, makefiles))]
 pub async fn new_process<'a>(
     MessageCtx { state, pid, stream }: MessageCtx<'a>,
     makefiles: Vec<RemoteMakefile>,
@@ -57,7 +57,7 @@ pub async fn new_process<'a>(
         Ok(_) => info!(?pid, "Makefiles successfully distributed"),
         Err(e) => {
             let msg = ProcessMessage::StderrLog {
-                log: format!("Dake failed to distribute makefile to remote hosts: {e:?}"),
+                log: format!("Dake failed to distribute makefile to remote hosts: {e}"),
             };
 
             if let Err(e) = write_message(stream, Message::new(msg, pid.clone())).await {
@@ -74,10 +74,10 @@ pub async fn new_process<'a>(
     }
 
     // --- Step 2: Register process in shared state ---
-    state.register_process(pid.clone(), process_datas).await;
-    debug!(?pid, "Registered process in shared database");
+    state.set_process_datas(pid.clone(), process_datas).await;
+    info!(?pid, "Wrote process datas of {pid} in shared database");
 
-    // --- Step 3: Execute local make process ---
+    // ;--- Step 3: Execute local make process ---
     info!(?pid, args = ?args, dir = ?pid.path(), "Launching local make process");
 
     let hub = state.notifier_hub().clone();
@@ -132,7 +132,7 @@ pub async fn new_process<'a>(
                         break *exit_code;
                     }
                     Notif::Log { output, log } => {
-                        debug!(?pid, output=?output, "Forwarding log to client");
+                        info!(?pid, output=?output, "Forwarding log to client");
                         let msg = match output {
                             OutputFile::Stdout => ProcessMessage::StdoutLog { log: log.to_string() },
                             OutputFile::Stderr => ProcessMessage::StderrLog { log: log.to_string() },
@@ -142,7 +142,7 @@ pub async fn new_process<'a>(
                         }
                     }
                     _ => {
-                        debug!(?pid, notif=?notif, "Ignoring irrelevant notification");
+                        info!(?pid, notif=?notif, "Ignoring irrelevant notification");
                         continue;
                     }
                 }

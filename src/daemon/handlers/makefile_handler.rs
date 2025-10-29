@@ -19,7 +19,7 @@ pub async fn receiv_makefile<'a>(
     let message = |inner| Message::new(inner, pid.clone());
 
     // Registering the new makefile in the shared database
-    state.register_process(pid.clone(), process_datas).await;
+    state.set_process_datas(pid.clone(), process_datas).await;
 
     // Attempt to persist makefile
     match push_makefile(&makefile, &pid) {

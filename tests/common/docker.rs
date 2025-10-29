@@ -1,7 +1,6 @@
 use std::{
     fs::File,
     io::Write,
-    iter::once,
     path::{Path, PathBuf},
 };
 
@@ -103,6 +102,7 @@ pub async fn container_exec(
     id: &str,
     command: &str,
     args: Vec<&str>,
+    current_dir: PathBuf,
     output: Option<PathBuf>,
     background: bool,
 ) -> Result<()> {
@@ -114,13 +114,15 @@ pub async fn container_exec(
         async move {
             let docker = Docker::new();
             let container = docker.containers().get(&id);
+            let cmd = format!(
+                "cd {} && {} {}",
+                current_dir.display(),
+                command,
+                args.join(" ")
+            );
             let mut stream = container.exec(
                 &ExecContainerOptions::builder()
-                    .cmd(
-                        once(command.as_str())
-                            .chain(args.iter().map(|s| s.as_str()))
-                            .collect(),
-                    )
+                    .cmd(vec!["sh", "-c", &cmd])
                     .attach_stdout(true)
                     .attach_stderr(true)
                     .build(),

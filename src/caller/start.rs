@@ -9,7 +9,7 @@ use crate::{
     process_id::ProcessId,
 };
 
-#[tracing::instrument]
+#[tracing::instrument(skip(stream, makefiles))]
 pub async fn start(
     stream: &mut Stream,
     pid: ProcessId,

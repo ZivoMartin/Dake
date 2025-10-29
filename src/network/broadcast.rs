@@ -27,7 +27,13 @@ where
     let connect_tasks = network
         .iter()
         .cloned()
-        .map(|sock| spawn(async move { connect(sock).await }))
+        .map(|sock| {
+            spawn(async move {
+                connect(sock.clone())
+                    .await
+                    .context(format!("Failed to connect to the host {sock}"))
+            })
+        })
         .collect::<Vec<_>>();
 
     // Wait for all tasks to finish
@@ -36,7 +42,10 @@ where
     // Handle both spawn errors and connection errors
     let mut streams: Vec<Stream> = connect_results
         .into_iter()
-        .map(|join_res| join_res.context("Failed to connect to a remote host.")?)
+        .zip(network)
+        .map(|(join_res, sock)| {
+            join_res.context(format!("Failed to connect to the host {sock}"))?
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     for (stream, message) in streams.iter_mut().zip(messages.into_iter()) {

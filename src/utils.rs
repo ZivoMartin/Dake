@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use std::env::var;
 use std::path::PathBuf;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 use which::which;
 
 use crate::env_variables::EnvVariable;
@@ -9,7 +9,7 @@ use crate::env_variables::EnvVariable;
 /// Attempts to locate the DAKE binary on the system.
 /// Returns the absolute path to the binary if found, or an error otherwise.
 pub fn get_dake_path() -> Result<PathBuf> {
-    debug!("Attempting to resolve DAKE binary path...");
+    info!("Attempting to resolve DAKE binary path...");
 
     // Retrieve environment variable or fall back to defaults
     let path_str = var(EnvVariable::BinaryPath.to_string()).unwrap_or_else(|_| {
@@ -20,13 +20,13 @@ pub fn get_dake_path() -> Result<PathBuf> {
         }
     });
 
-    debug!("Raw path string resolved to '{}'", path_str);
+    info!("Raw path string resolved to '{}'", path_str);
 
     let path = PathBuf::from(&path_str);
 
     // Case 1: The path exists in the filesystem
     if path.exists() {
-        debug!("Found existing path: {:?}", path);
+        info!("Found existing path: {:?}", path);
 
         if path.is_file() {
             info!("Resolved DAKE binary path: {}", path.display());
@@ -41,7 +41,7 @@ pub fn get_dake_path() -> Result<PathBuf> {
     }
 
     // Case 2: Try to find it in PATH (only relevant for short commands like "dake")
-    debug!("Path does not exist, attempting lookup via system PATH...");
+    info!("Path does not exist, attempting lookup via system PATH...");
     if let Ok(resolved) = which(&path_str) {
         info!("Found DAKE binary in PATH at: {}", resolved.display());
         return Ok(resolved);

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::network::SocketAddr;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProcessDatas {
     pub caller_daemon: SocketAddr,
     pub involved_hosts: Vec<SocketAddr>,

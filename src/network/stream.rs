@@ -70,12 +70,9 @@ impl Stream {
                     .context("Failed to connect over TCP")?,
             ),
             SocketAddr::Unix(addr) => Self::Unix(
-                UnixStream::connect(
-                    addr.as_pathname()
-                        .context("Failed to get the pathname of the socket address.")?,
-                )
-                .await
-                .context("Failed to connect over Unix")?,
+                UnixStream::connect(addr.context("Can't connect to an unnamed socket.")?)
+                    .await
+                    .context("Failed to connect over Unix")?,
             ),
         })
     }
@@ -87,7 +84,7 @@ impl Stream {
                     .peer_addr()
                     .context("Failed to fetch peer address from TCP.")?,
             ),
-            Stream::Unix(stream) => SocketAddr::Unix(
+            Stream::Unix(stream) => SocketAddr::from(
                 stream
                     .peer_addr()
                     .context("Failed to fetch peer address from Unix.")?,
@@ -102,7 +99,7 @@ impl Stream {
                     .local_addr()
                     .context("Failed to fetch local address from TCP.")?,
             ),
-            Stream::Unix(stream) => SocketAddr::Unix(
+            Stream::Unix(stream) => SocketAddr::from(
                 stream
                     .local_addr()
                     .context("Failed to fetch local address from Unix.")?,

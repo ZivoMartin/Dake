@@ -11,7 +11,7 @@ use tokio::{
     task::JoinHandle,
     time::sleep,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::{
     daemon::{Notif, state::State},
@@ -73,7 +73,7 @@ pub async fn execute_make(
         .spawn()
         .with_context(|| format!("Failed to spawn make process in {current_dir:?}"))?;
 
-    debug!("Spawned make process (pid={:?})", process.id());
+    info!("Spawned make process (pid={:?})", process.id());
 
     // --- Step 2: Log forwarding helpers ---
     fn spawn_log_forwarder<R, F>(
@@ -95,7 +95,7 @@ pub async fn execute_make(
                     warn!("Failed to forward process log to {}: {e:?}", pid.sock());
                 }
             }
-            debug!("Log forwarder terminated for {:?}", pid);
+            info!("Log forwarder terminated for {:?}", pid);
         })
     }
 
@@ -150,13 +150,13 @@ pub async fn execute_make(
             loop {
                 select! {
                     result = process.wait() => {
-                        debug!("Make process exited normally");
+                        info!("Make process exited normally");
                         break result;
                     }
                     notif = subscriber.recv() => {
                         match notif {
                             Some(n) => {
-                                debug!("Received notification: {:?}", n);
+                                info!("Received notification: {:?}", n);
                                 if matches!(n.as_ref(), Notif::Done) {
                                     info!("Received Done signal for {:?}, terminating make process", pid);
                                     if let Err(e) = process.kill().await {

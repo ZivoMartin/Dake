@@ -1,5 +1,5 @@
 use crate::{daemon::handlers::OutputFile, network::SocketAddr};
-use tracing::debug;
+use tracing::info;
 
 /// Notification message exchanged between threads (e.g., daemon and workers).
 #[derive(Debug)]
@@ -21,13 +21,13 @@ impl Notif {
     /// Emits a trace log when a notification is sent or handled.
     pub fn trace(&self) {
         match self {
-            Notif::Done => debug!("Notification: task done"),
-            Notif::Log { log, .. } => debug!("Notification: log message - {}", log),
+            Notif::Done => info!("Notification: task done"),
+            Notif::Log { log, .. } => info!("Notification: log message - {}", log),
             Notif::Error {
                 exit_code,
                 guilty_node,
             } => {
-                debug!(
+                info!(
                     "Notification: error (code {}, node {})",
                     exit_code, guilty_node
                 )

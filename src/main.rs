@@ -80,6 +80,7 @@ enum Commands {
 /// to the relevant Dake subsystem (`fetch`, `daemon`, or `caller`).
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
+    #[cfg(debug_assertions)]
     tracing_subscriber::fmt::init();
 
     let cli = Cli::parse();

@@ -79,6 +79,9 @@ pub async fn start() -> Result<()> {
 
     let unix_listener = UnixListener::bind(path)?;
     info!("Daemon listening on {}", DAEMON_UNIX_SOCKET);
+    let unix_addr = unix_listener
+        .local_addr()
+        .context("Failed to fetch local unix addr: {e:?}")?;
 
     // Initialising state
     let state = State::new(daemon_tcp_sock);
@@ -113,7 +116,7 @@ pub async fn start() -> Result<()> {
         loop {
             match unix_listener.accept().await {
                 Ok((stream, addr)) => {
-                    info!("UNIX connection accepted");
+                    info!("UNIX connection accepted on {unix_addr:?} form {addr:?}",);
                     if unix_tx
                         .send((Stream::Unix(stream), SocketAddr::from(addr)))
                         .await
@@ -150,11 +153,7 @@ pub async fn start() -> Result<()> {
                         break;
                     }
                     Err(e) => {
-                        warn!(
-                            "Failed to read DaemonMessage from {}: {}",
-                            addr,
-                            e.root_cause()
-                        );
+                        warn!("Failed to read DaemonMessage from {}: {}", addr, e);
                         break;
                     }
                 };

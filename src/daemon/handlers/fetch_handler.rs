@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
 };
 
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::{
     daemon::{MessageCtx, execute_make, fs::get_makefile_path},
@@ -79,7 +79,7 @@ pub async fn handle_fetch<'a>(
     // --- Step 1: Resolve makefile path ---
     let mut path = match labeled_path.or_else(|| get_makefile_path(&pid).ok()) {
         Some(p) => {
-            debug!("Resolved makefile path: {:?}", p);
+            info!("Resolved makefile path: {:?}", p);
             p
         }
         None => warn_and_forward!("Failed to resolve the makefile path."),
@@ -137,10 +137,10 @@ pub async fn handle_fetch<'a>(
 
     // --- Step 4: Validate resulting target path ---
     path.push(target.clone());
-    debug!("Checking resulting path {:?}", path);
+    info!("Checking resulting path {:?}", path);
 
     match path.metadata() {
-        Ok(meta) if meta.is_file() => debug!("Verified target file exists: {:?}", path),
+        Ok(meta) if meta.is_file() => info!("Verified target file exists: {:?}", path),
         Ok(_) => warn_and_forward!(
             "Resolved path {path:?} is not a file (possibly directory or special entry)",
             format!(
@@ -182,7 +182,7 @@ pub async fn handle_fetch<'a>(
             Err(e) => warn_and_forward!("Failed to read {path:?}: {e:?}", err),
         };
         if n == 0 {
-            debug!("End of file reached for '{target}'");
+            info!("End of file reached for '{target}'");
             break;
         }
 

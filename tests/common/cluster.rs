@@ -63,6 +63,7 @@ impl Cluster {
                 node,
                 "dake",
                 vec!["daemon"],
+                PathBuf::from("/"),
                 Some(PathBuf::from(format!("{LOG_DIR}/log_daemon_{node}"))),
                 true,
             )
@@ -102,8 +103,11 @@ impl Cluster {
         for (path, mut content) in files {
             let path = tmp_dir.path().join(path);
             for i in 0..self.nodes.len() {
-                content = content.replace(&format!("NODE-{i}"), &self.nodes_ips[i].to_string())
+                let ip = &self.nodes_ips[i].to_string();
+                println!("Replacing NODE-{i} with {ip}");
+                content = content.replace(&format!("NODE-{i}"), ip)
             }
+            println!("{content}");
             write(path.clone(), content)
                 .context(format!("Failed to write into {}.", path.display()))?
         }
@@ -115,11 +119,11 @@ impl Cluster {
         Ok(())
     }
 
-    pub async fn start_dake(&self, id: &str, output: PathBuf) -> Result<()> {
+    pub async fn start_dake(&self, dest_path: PathBuf, id: &str, output: PathBuf) -> Result<()> {
         let mut path = PathBuf::from(LOG_DIR);
         path.push(&output);
 
-        container_exec(id, "dake", vec![], Some(path), false)
+        container_exec(id, "dake", vec![], dest_path, Some(path), false)
             .await
             .context(format!("Failed to execute dake on {id}"))?;
         Ok(())
