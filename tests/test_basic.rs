@@ -6,8 +6,8 @@ use anyhow::Result;
 use crate::common::cluster::{clean_cluster, setup_cluster};
 
 const MAKEFILE: &'static str = "
-#!ROOT_DEF NODE-1 = /project
-#!ROOT_DEF NODE-2 = /project
+#!ROOT_DEF NODE-1 = /test_basic
+#!ROOT_DEF NODE-2 = /test_basic
 
 main: main.o a.o b.o c.o
 	$(CC) -o main main.o a.o b.o c.o
@@ -51,7 +51,7 @@ async fn test_basic_build() -> Result<()> {
         (PathBuf::from("c.c"), C.to_string()),
         (PathBuf::from("main.c"), MAIN.to_string()),
     ];
-    let dest_path = PathBuf::from("test_basic");
+    let dest_path = PathBuf::from("/test_basic");
     cluster.push_files(files, &dest_path).await?;
 
     cluster

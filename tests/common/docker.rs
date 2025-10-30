@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Error, Result, ensure};
 use futures::StreamExt;
 use shiplift::{
     ContainerOptions, Docker, ExecContainerOptions, NetworkCreateOptions, tty::TtyChunk,
@@ -71,12 +71,12 @@ pub async fn get_container_ip(container_id: &str, network: &str) -> Result<Strin
 
     let ip = network_info.ip_address.clone();
 
-    assert!(!ip.is_empty(), "Failed to fetch the ip of {container_id}");
+    ensure!(!ip.is_empty(), "Failed to fetch the ip of {container_id}");
 
     Ok(ip.clone())
 }
 
-/// Copy files into a container under `/project`
+/// Copy files into a container
 pub async fn copy_into_container(container: &str, src_dir: &Path, dest_dir: &Path) -> Result<()> {
     let status = Command::new("docker")
         .args([
@@ -134,6 +134,7 @@ pub async fn container_exec(
                     match chunk {
                         Ok(TtyChunk::StdOut(bytes)) | Ok(TtyChunk::StdErr(bytes)) => {
                             f.write_all(&bytes)?;
+                            f.flush()?;
                         }
                         Ok(TtyChunk::StdIn(_)) => {}
                         Err(e) => eprintln!("Stream error: {}", e),

@@ -7,7 +7,7 @@ use futures::future::try_join_all;
 use tempfile::tempdir;
 
 use std::{
-    fs::{create_dir, remove_file, write},
+    fs::{create_dir, remove_dir_all, remove_file, write},
     net::IpAddr,
     path::{Path, PathBuf},
 };
@@ -32,14 +32,12 @@ impl Cluster {
         create_network(&network).await?;
 
         let log_dir = PathBuf::from(LOG_DIR);
-        if !log_dir.is_dir() {
-            if log_dir.is_file() {
-                if let Err(e) = remove_file(&log_dir) {
-                    eprintln!("Failed to remove log_dir file: {e}")
-                }
-            }
-            create_dir(log_dir)?
+        if log_dir.is_dir() {
+            remove_dir_all(&log_dir).context("Failed to clean logs dir.")?;
+        } else if log_dir.is_file() {
+            remove_file(&log_dir).context("Failed to remove logs file.")?;
         }
+        create_dir(log_dir)?;
 
         let mut nodes = Vec::new();
         for i in 0..size {
