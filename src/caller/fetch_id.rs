@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub async fn fetch_fresh_id(stream: &mut Stream, pid: ProjectId) -> Result<ProcessId> {
-    let default_pid = ProcessId::new_default(pid);
+    let default_pid = ProcessId::process_less(pid);
     let inner = DaemonMessage::FreshId;
     let msg = Message::new(inner, default_pid);
 

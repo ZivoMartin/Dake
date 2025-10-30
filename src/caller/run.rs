@@ -52,7 +52,8 @@ pub async fn make(mut args: Vec<String>) -> Result<i32> {
     let pid = fetch_fresh_id(&mut stream, project_id).await?;
 
     // Step 4: Generate makefiles
-    let makefiles = RemoteMakefileSet::generate(tokens, pid.clone(), get_dake_path()?);
+    let makefiles = RemoteMakefileSet::generate(tokens, pid.clone(), get_dake_path()?)
+        .context("Failed to generate makefiles.")?;
     info!("Generated RemoteMakefileSet for daemon");
 
     write(TMP_MAKEFILE_NAME, makefiles.my_makefile())

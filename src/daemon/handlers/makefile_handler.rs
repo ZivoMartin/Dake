@@ -7,19 +7,21 @@ use crate::{
 };
 
 /// Receives a remote makefile, writes it to disk, and replies with an acknowledgment.
-#[tracing::instrument]
+#[tracing::instrument(skip(stream, state, makefile))]
 pub async fn receiv_makefile<'a>(
     MessageCtx { pid, stream, state }: MessageCtx<'a>,
     makefile: RemoteMakefile,
     process_datas: ProcessDatas,
 ) {
-    info!("Handling incoming makefile");
+    info!("Handling incoming makefile: {}", makefile.to_string());
 
     // Closure to simplify message creation with same pid and client
     let message = |inner| Message::new(inner, pid.clone());
 
     // Registering the new makefile in the shared database
-    state.set_process_datas(pid.clone(), process_datas).await;
+    state
+        .set_process_datas(process_datas.pid.clone(), process_datas)
+        .await;
 
     // Attempt to persist makefile
     match push_makefile(&makefile, &pid) {

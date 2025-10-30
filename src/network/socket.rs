@@ -32,10 +32,29 @@ impl SocketAddr {
     }
 
     pub fn ip(&self) -> Option<IpAddr> {
+        self.get_tcp().map(|sock| sock.ip())
+    }
+
+    pub fn get_tcp(&self) -> Option<TcpSocketAddr> {
         match self {
             Self::Unix(_) => None,
-            Self::Tcp(sock) => Some(sock.ip()),
+            Self::Tcp(sock) => Some(*sock),
         }
+    }
+
+    pub fn get_unix(&self) -> Option<Option<PathBuf>> {
+        match self {
+            Self::Unix(sock) => Some(sock.clone()),
+            Self::Tcp(_) => None,
+        }
+    }
+
+    pub fn is_unix(&self) -> bool {
+        matches!(self, Self::Unix(_))
+    }
+
+    pub fn is_tcp(&self) -> bool {
+        matches!(self, Self::Tcp(_))
     }
 }
 

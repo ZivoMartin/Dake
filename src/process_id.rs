@@ -7,7 +7,7 @@ use crate::network::SocketAddr;
 
 /// Represents the unique identifier of a process within a given project.
 /// Combines a numeric process ID with a [`ProjectId`] that identifies the caller.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct ProcessId {
     pub id: u64,
     pub project_id: ProjectId,
@@ -16,7 +16,7 @@ pub struct ProcessId {
 impl ProcessId {
     /// Creates a process ID with the default numeric value (0).
     /// This is typically used for uninitialized or placeholder processes.
-    pub fn new_default(project_id: ProjectId) -> Self {
+    pub fn process_less(project_id: ProjectId) -> Self {
         info!(
             "Creating default ProcessId (id = 0) for project {:?}",
             project_id
@@ -24,8 +24,16 @@ impl ProcessId {
         Self { id: 0, project_id }
     }
 
+    pub fn is_process_less(&self) -> bool {
+        self.id == 0
+    }
+
     /// Creates a new [`ProcessId`] using an ID, socket address, and file path.
     pub fn new(id: u64, sock: SocketAddr, path: PathBuf) -> Self {
+        if sock.is_unix() {
+            warn!("Creating a ProcessId with a unix socket: {sock}");
+        }
+
         info!(
             "Creating ProcessId with id={} from socket {:?} and path {:?}",
             id, sock, path
@@ -56,7 +64,7 @@ impl ProcessId {
 }
 
 /// Identifies a project by its caller’s socket address and working directory.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct ProjectId {
     /// The socket of the original caller.
     pub sock: SocketAddr,

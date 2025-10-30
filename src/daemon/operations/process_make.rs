@@ -55,7 +55,11 @@ pub async fn execute_make(
         .context("Failed to fetch the caller sock, process is over.")?
         .caller_daemon;
 
+    info!("Just fetched caller_sock: {caller_sock}");
+
     // --- Step 1: Configure and spawn process ---
+    info!("Spawning make process..");
+
     let mut cmd = Command::new("make");
 
     if let Some(target) = target {

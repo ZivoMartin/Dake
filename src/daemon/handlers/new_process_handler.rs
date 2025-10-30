@@ -19,7 +19,7 @@ use crate::{
         process_datas::ProcessDatas,
     },
     makefile::RemoteMakefile,
-    network::{Message, ProcessMessage, write_message},
+    network::{Message, ProcessMessage, SocketAddr, write_message},
 };
 use tokio::select;
 use tracing::{error, info, warn};
@@ -32,13 +32,13 @@ use tracing::{error, info, warn};
 /// 3. Spawns and monitors the local `make` process.
 /// 4. Forwards logs and handles error/cancel notifications.
 /// 5. Sends a final [`ProcessMessage::End`] to the originating client.
-#[tracing::instrument(skip(state, stream, makefiles))]
+#[tracing::instrument(skip(state, pid, args, stream, makefiles))]
 pub async fn new_process<'a>(
     MessageCtx { state, pid, stream }: MessageCtx<'a>,
     makefiles: Vec<RemoteMakefile>,
     args: Vec<String>,
 ) {
-    info!("Starting new process handler");
+    info!("Starting new process handler for pid = {pid} with args = {args:?}.");
 
     let daemon_addr = state.daemon_sock.clone();
 
@@ -48,27 +48,51 @@ pub async fn new_process<'a>(
     }
 
     // --- Step 1: Distribute remote makefiles ---
-    let involved_hosts: Vec<_> = makefiles.iter().map(|m| m.sock()).cloned().collect();
+    let involved_hosts: Vec<_> = makefiles
+        .iter()
+        .map(|m| SocketAddr::from(*m.sock()))
+        .collect();
 
-    info!("Distributing makefiles to involved hosts");
-    let process_datas = ProcessDatas::new(daemon_addr, involved_hosts.clone(), args.clone());
+    info!("Distributing makefiles to involved hosts: {involved_hosts:?}");
+    let process_datas = ProcessDatas::new(
+        pid.clone(),
+        daemon_addr,
+        involved_hosts.clone(),
+        args.clone(),
+    );
 
-    match distribute(&state, pid.clone(), makefiles, process_datas.clone()).await {
+    match distribute(pid.clone(), makefiles, process_datas.clone()).await {
         Ok(_) => info!(?pid, "Makefiles successfully distributed"),
         Err(e) => {
+            warn!("Failed to distribute the makefiles: {e}");
+
+            info!("Sending error message to the user.");
             let msg = ProcessMessage::StderrLog {
                 log: format!("Dake failed to distribute makefile to remote hosts: {e}"),
             };
 
             if let Err(e) = write_message(stream, Message::new(msg, pid.clone())).await {
                 warn!(?pid, error=?e, "Failed to forward distribute error to client");
+            } else {
+                info!("Message sent successfully");
             }
 
+            info!("Sending end message to the user.");
             let msg = ProcessMessage::End { exit_code: 1 };
 
             if let Err(e) = write_message(stream, Message::new(msg, pid.clone())).await {
                 warn!(?pid, error=?e, "Failed to send end message to client");
+            } else {
+                info!("Message sent successfully");
             }
+
+            info!("End of the process, cleaning state database.");
+            if let Err(e) = state.remove_process(&pid).await {
+                warn!("Failed to clean the state database: {e:?}");
+            } else {
+                info!("Successfully cleaned the database")
+            }
+
             return;
         }
     }
@@ -88,6 +112,7 @@ pub async fn new_process<'a>(
         select! {
             // Handle local make process completion
             result = execute_make(&state, pid.clone(), pid.path().clone(), None, &args) => {
+                info!("Make process is done.");
                 break match result {
                     Ok(Some(status)) => {
                         if status.success() {
@@ -117,6 +142,8 @@ pub async fn new_process<'a>(
                         break 1;
                     }
                 };
+                info!("Received a new notification: {notif:?}");
+
 
                 match notif.as_ref() {
                     Notif::Error { exit_code, guilty_node } => {

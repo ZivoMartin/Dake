@@ -16,7 +16,7 @@ where
     broadcast_messages(network, vec![message; n]).await
 }
 
-#[tracing::instrument]
+#[tracing::instrument(skip(messages, network))]
 pub async fn broadcast_messages<M>(
     network: Vec<SocketAddr>,
     messages: Vec<Message<M>>,
@@ -24,6 +24,9 @@ pub async fn broadcast_messages<M>(
 where
     M: MessageTrait,
 {
+    info!("Broadcasting {} messages to {network:?}", messages.len());
+
+    info!("Connecting to each hosts..");
     let connect_tasks = network
         .iter()
         .cloned()
@@ -47,6 +50,8 @@ where
             join_res.context(format!("Failed to connect to the host {sock}"))?
         })
         .collect::<Result<Vec<_>, _>>()?;
+
+    info!("Connected successfully.");
 
     for (stream, message) in streams.iter_mut().zip(messages.into_iter()) {
         info!("Sending broadcast message to host {}", stream.peer_addr()?);

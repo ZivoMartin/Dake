@@ -170,24 +170,24 @@ pub async fn start() -> Result<()> {
                     }
                 };
 
-                match state.process_is_registered(&message.pid).await {
-                    Ok(true) => info!("Process {:?} is indeed registered.", message.pid),
-                    Ok(false) => {
-                        if message.pid.id == 0 {
-                            info!("Received a process less message.");
-                        } else {
+                if message.pid.is_process_less() {
+                    info!("Received a process less message.");
+                } else {
+                    match state.process_is_registered(&message.pid).await {
+                        Ok(true) => info!("Process {:?} is indeed registered.", message.pid),
+                        Ok(false) => {
                             info!(
                                 "We received a late message for process {:?}, this is ok but we ignore.",
                                 message.pid
                             );
                             continue;
                         }
-                    }
-                    Err(e) => {
-                        warn!(
-                            "We failed to fetch registeration informations from the state due to {e:?}, ignoring the message, the message has to be ignored."
-                        );
-                        continue;
+                        Err(e) => {
+                            warn!(
+                                "We failed to fetch registeration informations from the state due to {e:?}, ignoring the message, the message has to be ignored."
+                            );
+                            continue;
+                        }
                     }
                 }
 

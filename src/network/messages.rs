@@ -64,7 +64,11 @@ impl<'de> Deserialize<'de> for MessageHeader {
             )));
         }
 
-        let size = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+        let size = u64::from_le_bytes(
+            bytes[..8]
+                .try_into()
+                .map_err(|_| serde::de::Error::custom("Failed to cast integer in bytes."))?,
+        );
         let kind = match bytes[8] {
             0 => MessageKind::DaemonMessage,
             1 => MessageKind::ProcessMessage,

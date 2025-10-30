@@ -51,12 +51,12 @@ pub async fn write_message<M: MessageTrait, S: AsyncWriteExt + Unpin>(
 
 /// Connect with tcp on the given socket.
 pub async fn connect(sock: SocketAddr) -> Result<Stream> {
-    info!("Utils: Attempting to connect to socket {}.", sock);
+    info!("Attempting to connect to socket {}.", sock);
     let stream = Stream::connect(sock.clone())
         .await
         .context("When connecting on the stream.")?;
 
-    info!("Utils: Connected to {}", sock);
+    info!("Connected to {}", sock);
     Ok(stream)
 }
 
@@ -64,10 +64,10 @@ pub async fn connect(sock: SocketAddr) -> Result<Stream> {
 /// Returns the stream used to send the message.
 /// Returns an error if connection or writing fails.
 pub async fn send_message<M: MessageTrait>(msg: Message<M>, sock: SocketAddr) -> Result<Stream> {
-    info!("Utils: Attempting to send a message to socket {}", sock);
+    info!("Attempting to send a message to socket {}", sock);
     let mut stream = connect(sock.clone()).await?;
     write_message(&mut stream, msg).await?;
-    info!("Utils: Successfully sent message to {}", sock);
+    info!("Successfully sent message to {}", sock);
     Ok(stream)
 }
 
@@ -229,7 +229,7 @@ pub async fn read_next_message<S: AsyncReadExt + Unpin>(
     let header: MessageHeader = dec!(header).context("Failed to decode the MessageHeader.")?;
 
     info!(
-        "Utils: Received message header with size={} and kind={:?}",
+        "Received message header with size={} and kind={:?}",
         header.size, header.kind
     );
 
@@ -237,10 +237,10 @@ pub async fn read_next_message<S: AsyncReadExt + Unpin>(
     let mut message = vec![0; header.size as usize];
     if let Err(e) = stream.read_exact(&mut message).await {
         if matches!(e.kind(), ErrorKind::UnexpectedEof) {
-            error!("Utils: Header size did not match actual message size");
+            error!("Header size did not match actual message size");
             bail!("The message size and the header annotated size doesn't match.");
         } else {
-            error!("Utils: Error when reading message: {}", e);
+            error!("Error when reading message: {}", e);
             bail!("Error when reading a message.");
         }
     }
@@ -248,12 +248,12 @@ pub async fn read_next_message<S: AsyncReadExt + Unpin>(
     // Check message kind
     if kind != header.kind {
         error!(
-            "Utils: Expected message kind {:?}, but received {:?}",
+            "Expected message kind {:?}, but received {:?}",
             kind, header.kind
         );
         bail!("The asked and received kind doesn't match.");
     } else {
-        info!("Utils: Successfully read message of kind {:?}", kind);
+        info!("Successfully read message of kind {:?}", kind);
         Ok(Some(message))
     }
 }

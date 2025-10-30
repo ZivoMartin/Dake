@@ -9,11 +9,13 @@
 use crate::{
     lexer::{Directive, TargetLabel, Token},
     makefile::{RemoteMakefile, RemoteMakefileSet},
-    network::SocketAddr,
-    process_id::ProcessId,
+    network::DEFAULT_PORT,
+    process_id::{ProcessId, ProjectId},
 };
+use anyhow::{Context, Result};
 use std::{
     collections::{HashMap, HashSet},
+    net::SocketAddr,
     path::PathBuf,
 };
 use tracing::{info, warn};
@@ -32,35 +34,46 @@ impl RemoteMakefileSet {
     ///
     /// # Returns
     /// A new [`RemoteMakefileSet`] containing the distributed makefiles.
-    pub fn generate(tokens: Vec<Token>, pid: ProcessId, dake_path: PathBuf) -> Self {
+    pub fn generate(
+        tokens: Vec<Token>,
+        ProcessId {
+            id,
+            project_id: ProjectId { sock, path },
+        }: ProcessId,
+        dake_path: PathBuf,
+    ) -> Result<Self> {
         info!(
             "RemoteMakefileSet: Starting generation with {} tokens",
             tokens.len()
         );
 
+        let sock = sock
+            .get_tcp()
+            .context("The socket address in the process id is a unix socket.")?;
+
         let mut full_fetch_makefile = String::new();
-        let mut saw_ips = HashSet::from([pid.sock()]);
-        let mut makefiles = vec![RemoteMakefile::new(String::new(), pid.sock())];
-        let mut root_path_set = HashMap::from([(pid.sock(), pid.path().clone())]);
+        let mut saw_ips = HashSet::from([sock]);
+        let mut makefiles = vec![RemoteMakefile::new(String::new(), sock)];
+        let mut root_path_set = HashMap::from([(sock, path.clone())]);
 
         // Utility closure to construct fetch commands
         let get_fetch_command = |root_path_set: &HashMap<SocketAddr, PathBuf>,
                                  label: TargetLabel,
                                  target: String|
          -> String {
-            let path = match label.path {
-                Some(path) => format!("--labeled-path {}", path.display()),
+            let label_path = match label.path {
+                Some(label_path) => format!("--labeled-path {}", label_path.display()),
                 None => match root_path_set.get(&label.sock) {
-                    Some(path) => format!("--labeled-path {}", path.display()),
+                    Some(label_path) => format!("--labeled-path {}", label_path.display()),
                     None => String::new(),
                 },
             };
             format!(
-                "{binary} fetch \"{project_path}\" \"{project_sock}\" {process_id} {label_sock} {path} \"{target}\"\n",
+                "{binary} fetch \"{project_path}\" \"{project_sock}\" {process_id} {label_sock} {label_path} \"{target}\"\n",
                 binary = dake_path.display(),
-                project_path = pid.path().display(),
-                project_sock = pid.sock().to_string(),
-                process_id = pid.id(),
+                project_path = path.display(),
+                project_sock = sock.to_string(),
+                process_id = id,
                 label_sock = label.sock
             )
         };
@@ -82,7 +95,7 @@ impl RemoteMakefileSet {
                     label,
                     command,
                 } => {
-                    let label = label.unwrap_or_else(|| TargetLabel::new(pid.sock(), None));
+                    let label = label.unwrap_or_else(|| TargetLabel::new(sock, None));
                     info!(
                         "RemoteMakefileSet: Processing target '{}' for label {:?}",
                         target, label
@@ -119,12 +132,12 @@ impl RemoteMakefileSet {
                     }
                 }
                 Token::Directive(dir) => match dir {
-                    Directive::RootDef { ip, path } => {
+                    Directive::RootDef { ip, path: dir_path } => {
                         info!(
                             "RemoteMakefileSet: Registered RootDef ip={}, path={:?}",
-                            ip, path
+                            ip, dir_path
                         );
-                        root_path_set.insert(SocketAddr::new_tcp(ip, 0), path);
+                        root_path_set.insert(SocketAddr::new(ip, DEFAULT_PORT), dir_path);
                     }
                 },
             }
@@ -132,7 +145,7 @@ impl RemoteMakefileSet {
 
         // Build RemoteMakefileSet from results
         let mut iter = makefiles.into_iter();
-        match iter.next() {
+        Ok(match iter.next() {
             Some(first) => {
                 let rest: Vec<_> = iter.collect();
                 info!(
@@ -145,6 +158,6 @@ impl RemoteMakefileSet {
                 warn!("RemoteMakefileSet: makefiles array should not be empty at this point.");
                 RemoteMakefileSet::new(Vec::new(), String::new())
             }
-        }
+        })
     }
 }

@@ -13,12 +13,12 @@
 //! If acknowledgments are missing after a timeout, or if any host sends a
 //! `Failed` message, the distributor aborts with an error.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use tracing::info;
 
 use crate::{
-    daemon::{operations::wait_acks::wait_acks, process_datas::ProcessDatas, state::State},
+    daemon::{operations::wait_acks::wait_acks, process_datas::ProcessDatas},
     makefile::RemoteMakefile,
     network::{DaemonMessage, Message, SocketAddr, broadcast_messages},
     process_id::ProcessId,
@@ -29,9 +29,8 @@ use crate::{
 /// - Binding or accepting sockets fails.
 /// - Sending messages to remote hosts fails.
 /// - Not all acknowledgments are received within the timeout.
-#[tracing::instrument]
+#[tracing::instrument(skip(makefiles, pid, process_datas))]
 pub async fn distribute(
-    state: &State,
     pid: ProcessId,
     makefiles: Vec<RemoteMakefile>,
     process_datas: ProcessDatas,
@@ -50,6 +49,8 @@ pub async fn distribute(
         .map(|makefile| SocketAddr::from(makefile.sock().clone()))
         .collect::<Vec<_>>();
 
+    info!("Involved sockets: {socks:?}");
+
     let messages = makefiles
         .iter()
         .cloned()
@@ -59,12 +60,20 @@ pub async fn distribute(
                     makefile,
                     process_datas: process_datas.clone(),
                 },
-                pid.clone(),
+                ProcessId::process_less(pid.project_id.clone()),
             )
         })
         .collect::<Vec<_>>();
 
+    info!("Broadcasting the messages..");
     let mut streams = broadcast_messages(socks, messages).await?;
+    info!("Broadcasting done !");
     let streams = streams.iter_mut().collect();
-    wait_acks(streams, None).await
+    info!("Waiting for acks...");
+    wait_acks(streams, None)
+        .await
+        .context("Failed to wait for acknowledgments from hosts.")?;
+    info!("Successfully received all the acks.");
+
+    Ok(())
 }

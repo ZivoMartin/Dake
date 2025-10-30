@@ -1,14 +1,21 @@
-use std::net::IpAddr;
+use std::{
+    fmt::Display,
+    net::{IpAddr, SocketAddr},
+};
 
 use derive_getters::Getters;
 use serde::{Deserialize, Serialize};
-
-use crate::network::SocketAddr;
 
 #[derive(Getters, Clone, Serialize, Deserialize, Debug)]
 pub struct RemoteMakefile {
     makefile: String,
     sock: SocketAddr,
+}
+
+impl Display for RemoteMakefile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Makefile of {}:\n{}", self.sock, self.makefile)
+    }
 }
 
 impl RemoteMakefile {
@@ -28,7 +35,7 @@ impl RemoteMakefile {
         self.makefile
     }
 
-    pub fn ip(&self) -> Option<IpAddr> {
+    pub fn ip(&self) -> IpAddr {
         self.sock.ip()
     }
 }

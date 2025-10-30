@@ -10,12 +10,16 @@
 //! Parsing is provided via [`FromStr`], allowing convenient conversion from
 //! string labels in Makefiles.
 
-use std::{net::IpAddr, path::PathBuf, str::FromStr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+    str::FromStr,
+};
 
 use anyhow::{Error, Result};
 use tracing::info;
 
-use crate::network::{DEFAULT_PORT, SocketAddr};
+use crate::network::DEFAULT_PORT;
 
 /// Represents a label for a build target in a distributed makefile.
 ///
@@ -36,7 +40,7 @@ impl TargetLabel {
         Self { sock, path }
     }
 
-    pub fn ip(&self) -> Option<IpAddr> {
+    pub fn ip(&self) -> IpAddr {
         self.sock.ip()
     }
 }
@@ -55,7 +59,7 @@ impl FromStr for TargetLabel {
         let parse_sock = |sock: &str| -> Result<SocketAddr> {
             sock.parse::<SocketAddr>().or_else(|_| {
                 // If no port provided, fall back to DEFAULT_PORT
-                Ok(SocketAddr::new_tcp(sock.parse()?, DEFAULT_PORT))
+                Ok(SocketAddr::new(sock.parse()?, DEFAULT_PORT))
             })
         };
 
