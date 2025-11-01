@@ -122,7 +122,7 @@ pub async fn handle_fetch<'a>(
 
                 let msg = Message::new(inner, pid.clone());
                 if let Err(e) = send_message(msg, caller_sock.clone()).await {
-                    warn!("Failed to send build failure to {}: {e:?}", pid.sock());
+                    warn!("Failed to send build failure to the caller: {e:?}");
                 }
             } else {
                 info!("Make completed successfully for target '{target}'");
@@ -185,11 +185,19 @@ pub async fn handle_fetch<'a>(
             info!("End of file reached for '{target}'");
             break;
         }
+        buf.truncate(n);
 
+        info!("Writing a new chunck of message, size = {n}");
         let message = Message::new(FetcherMessage::Object(buf), pid.clone());
         if let Err(e) = write_message(stream, message).await {
             warn_and_forward!("Failed to send packet to {client}: {e:?}", err);
         }
+    }
+
+    info!("Sending EOF message to signal that the object has been fully transmitted.");
+    let message = Message::new(FetcherMessage::Eof, pid.clone());
+    if let Err(e) = write_message(stream, message).await {
+        warn_and_forward!("Failed to send packet to {client}: {e:?}", err);
     }
 
     info!("Fetcher successfully completed for target '{target}'");

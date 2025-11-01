@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, path::PathBuf, str::FromStr};
 use tracing::{info, warn};
 
-use crate::network::SocketAddr;
+use crate::daemon::DaemonId;
 
 /// Represents the unique identifier of a process within a given project.
 /// Combines a numeric process ID with a [`ProjectId`] that identifies the caller.
@@ -28,26 +28,22 @@ impl ProcessId {
         self.id == 0
     }
 
-    /// Creates a new [`ProcessId`] using an ID, socket address, and file path.
-    pub fn new(id: u64, sock: SocketAddr, path: PathBuf) -> Self {
-        if sock.is_unix() {
-            warn!("Creating a ProcessId with a unix socket: {sock}");
-        }
-
+    /// Creates a new [`ProcessId`] using an ID, daemon id, and file path.
+    pub fn new(id: u64, daemon_id: DaemonId, path: PathBuf) -> Self {
         info!(
-            "Creating ProcessId with id={} from socket {:?} and path {:?}",
-            id, sock, path
+            "Creating ProcessId with id={} from daemon {} and path {:?}",
+            id, daemon_id, path
         );
         Self {
             id,
-            project_id: ProjectId::new(sock, path),
+            project_id: ProjectId::new(daemon_id, path),
         }
     }
 
     /// Returns the socket address associated with this process.
     #[inline]
-    pub fn sock(&self) -> SocketAddr {
-        self.project_id.sock.clone()
+    pub fn daemon_id(&self) -> DaemonId {
+        self.project_id.daemon_id.clone()
     }
 
     /// Returns the numeric ID of this process.
@@ -66,8 +62,8 @@ impl ProcessId {
 /// Identifies a project by its caller’s socket address and working directory.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct ProjectId {
-    /// The socket of the original caller.
-    pub sock: SocketAddr,
+    /// The daemon id of the original caller.
+    pub daemon_id: DaemonId,
 
     /// The working directory of the caller where `make` was executed.
     pub path: PathBuf,
@@ -75,26 +71,29 @@ pub struct ProjectId {
 
 impl ProjectId {
     /// Creates a new project identifier from a socket and file path.
-    pub fn new(sock: SocketAddr, path: PathBuf) -> Self {
+    pub fn new(daemon_id: DaemonId, path: PathBuf) -> Self {
         info!(
-            "Creating ProjectId with socket {:?} and path {:?}",
-            sock, path
+            "Creating ProjectId with id {:?} and path {:?}",
+            daemon_id, path
         );
 
         // Warn if the provided path looks suspicious (e.g., empty or not absolute)
         if path.as_os_str().is_empty() {
-            warn!("ProjectId created with an empty path: socket={:?}", sock);
+            warn!(
+                "ProjectId created with an empty path: daemon_id={:?}",
+                daemon_id
+            );
         } else if !path.is_absolute() {
             warn!("ProjectId created with a non-absolute path: {:?}", path);
         }
 
-        Self { sock, path }
+        Self { daemon_id, path }
     }
 }
 
 impl fmt::Display for ProjectId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}|{}", self.sock, self.path.display())
+        write!(f, "{}-{}", self.daemon_id, self.path.display())
     }
 }
 
@@ -102,17 +101,17 @@ impl FromStr for ProjectId {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        let (sock_str, path_str) = s
-            .split_once('|')
-            .ok_or_else(|| anyhow!("invalid ProjectId format, expected '<sock>|<path>'"))?;
+        let (daemon_id, path_str) = s
+            .split_once('-')
+            .ok_or_else(|| anyhow!("invalid ProjectId format, expected '<daemon_id>-<path>'"))?;
 
-        let sock: SocketAddr = sock_str
+        let daemon_id: DaemonId = daemon_id
             .parse()
-            .map_err(|e| anyhow!("invalid socket in ProjectId: {e}"))?;
+            .map_err(|e| anyhow!("invalid daemon id in ProjectId: {e}"))?;
 
         let path = PathBuf::from(path_str);
 
-        Ok(ProjectId { sock, path })
+        Ok(ProjectId { daemon_id, path })
     }
 }
 

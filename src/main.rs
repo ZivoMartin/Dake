@@ -23,6 +23,7 @@ use dake::{
     daemon::{self, fs},
     fetch,
     network::SocketAddr,
+    process_id::ProcessId,
 };
 use tracing::info;
 
@@ -47,14 +48,8 @@ struct Cli {
 enum Commands {
     /// Fetch a target from a remote daemon
     Fetch {
-        /// Path of the caller working directory
-        caller_path: PathBuf,
-
-        /// Socket of the caller
-        caller_sock: SocketAddr,
-
-        /// Id of the process used in the pid
-        id: u64,
+        /// Pid of the process
+        pid: ProcessId,
 
         /// Remote daemon socket to fetch from
         sock: SocketAddr,
@@ -89,14 +84,12 @@ async fn main() -> anyhow::Result<ExitCode> {
     let exit_code = match cli.command {
         Some(Commands::Fetch {
             target,
-            caller_path,
-            caller_sock,
-            id,
+            pid,
             labeled_path,
             sock,
         }) => {
             info!("Executing Fetch command for target '{target}' with socket {sock}");
-            fetch::fetch(target, labeled_path, caller_path, caller_sock, id, sock).await?;
+            fetch::fetch(target, labeled_path, pid, sock).await?;
             0
         }
 

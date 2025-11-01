@@ -2,12 +2,12 @@ use crate::common::docker::{
     container_exec, copy_into_container, create_container, create_network, get_container_ip,
     remove_container, remove_network,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use futures::future::try_join_all;
-use tempfile::tempdir;
+use tempfile::{NamedTempFile, tempdir};
 
 use std::{
-    fs::{create_dir, remove_dir_all, remove_file, write},
+    fs::{create_dir, read_to_string, remove_dir_all, remove_file, write},
     net::IpAddr,
     path::{Path, PathBuf},
 };
@@ -126,6 +126,36 @@ impl Cluster {
             .context(format!("Failed to execute dake on {id}"))?;
         Ok(())
     }
+
+    pub async fn confirm(
+        &self,
+        id: &str,
+        exec: &str,
+        args: Vec<&str>,
+        current_dir: PathBuf,
+        expected: &str,
+    ) -> Result<()> {
+        let tmp_file = NamedTempFile::new().context("Failed to create temporary file")?;
+        let output = tmp_file.path().to_path_buf();
+
+        container_exec(id, exec, args, current_dir, Some(output.clone()), false)
+            .await
+            .context(format!("Failed to execute dake on {id}"))?;
+        ensure!(
+            expected.is_empty() || output.exists(),
+            "After running the resulting executable {exec}, no output file have been generated.",
+        );
+        let content =
+            read_to_string(&output).context("Failed to read the content of the output file")?;
+        ensure!(
+            content == expected,
+            "The content of the output file and the expexted content doesn't match
+expected: {expected}
+actual: {content}"
+        );
+
+        Ok(())
+    }
 }
 
 static CLUSTER: OnceCell<Cluster> = OnceCell::const_new();
@@ -135,7 +165,7 @@ pub async fn setup_cluster() -> Result<&'static Cluster> {
     CLUSTER
         .get_or_try_init(|| async {
             println!("Setting up global cluster...");
-            Cluster::setup(3).await
+            Cluster::setup(4).await
         })
         .await
 }

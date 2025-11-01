@@ -1,11 +1,12 @@
 use anyhow::{Context, Result};
 use std::{
+    fs::read_to_string,
     path::PathBuf,
     process::{ExitStatus, Stdio},
     time::Duration,
 };
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, BufReader},
+    io::{AsyncReadExt, BufReader},
     process::Command,
     select, spawn,
     task::JoinHandle,
@@ -14,8 +15,9 @@ use tokio::{
 use tracing::{error, info, warn};
 
 use crate::{
-    daemon::{Notif, state::State},
-    network::{Message, ProcessMessage, SocketAddr, send_message},
+    daemon::{Notif, State},
+    makefile::RemoteMakefile,
+    network::{DaemonMessage, Message, SocketAddr, connect, write_message},
     process_id::ProcessId,
 };
 
@@ -47,6 +49,15 @@ pub async fn execute_make(
         "Starting make execution for PID {:?} in {:?}",
         pid, current_dir
     );
+
+    let path = RemoteMakefile::guess_path(current_dir.clone())
+        .context(format!("There is no makefile at {}", current_dir.display()))?;
+    info!("Full path to the makefile: {}", path.display());
+    let content = read_to_string(path.clone()).context(format!(
+        "Failed to read the content of the makefile at {}",
+        path.display(),
+    ))?;
+    info!("Content of the makefile:\n{content}");
 
     let caller_sock = state
         .read_process_data(&pid)
@@ -82,23 +93,41 @@ pub async fn execute_make(
     // --- Step 2: Log forwarding helpers ---
     fn spawn_log_forwarder<R, F>(
         pid: ProcessId,
-        pipe: R,
+        mut pipe: R,
         make_msg: F,
         caller_sock: SocketAddr,
     ) -> JoinHandle<()>
     where
-        R: AsyncBufRead + Unpin + Send + 'static,
-        F: Fn(String) -> ProcessMessage + Send + 'static,
+        R: AsyncReadExt + Unpin + Send + 'static,
+        F: Fn(String) -> DaemonMessage + Send + Sync + 'static,
     {
         spawn(async move {
-            let mut lines = pipe.lines();
-
-            while let Ok(Some(line)) = lines.next_line().await {
-                let msg = Message::new(make_msg(line), pid.clone());
-                if let Err(e) = send_message(msg, caller_sock.clone()).await {
-                    warn!("Failed to forward process log to {}: {e:?}", pid.sock());
+            let mut buf = [0u8; 4096];
+            let mut stream = match connect(caller_sock.clone()).await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    warn!("Failed to connect with the daemon: {e}");
+                    return;
+                }
+            };
+            loop {
+                match pipe.read(&mut buf).await {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        let text = String::from_utf8_lossy(&buf[..n]);
+                        let msg = Message::new(make_msg(text.to_string()), pid.clone());
+                        if let Err(e) = write_message(&mut stream, msg).await {
+                            warn!("Failed to forward process log to the caller: {e:?}");
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Error reading process output for {:?}: {e:?}", pid);
+                        break;
+                    }
                 }
             }
+
             info!("Log forwarder terminated for {:?}", pid);
         })
     }
@@ -111,7 +140,7 @@ pub async fn execute_make(
         handlers.push(spawn_log_forwarder(
             pid.clone(),
             stdout,
-            |log| ProcessMessage::StdoutLog { log },
+            |log| DaemonMessage::StdoutLog { log },
             caller_sock.clone(),
         ));
     } else {
@@ -123,7 +152,7 @@ pub async fn execute_make(
         handlers.push(spawn_log_forwarder(
             pid.clone(),
             stderr,
-            |log| ProcessMessage::StderrLog { log },
+            |log| DaemonMessage::StderrLog { log },
             caller_sock,
         ));
     } else {

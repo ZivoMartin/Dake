@@ -5,25 +5,28 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Result, bail};
-use derive_getters::Getters;
+use anyhow::{Context, Result, bail};
 use notifier_hub::notifier::NotifierHub;
 use tokio::{select, sync::Mutex, time::sleep};
 use tracing::{info, warn};
 
 use crate::{
-    daemon::{Notif, process_datas::ProcessDatas},
+    daemon::{Notif, memory::config::DaemonConfig, process_datas::ProcessDatas},
     network::SocketAddr,
     process_id::{ProcessId, ProjectId},
 };
 
 type Wrapped<T> = Arc<Mutex<T>>;
+type Hub = Wrapped<NotifierHub<Arc<Notif>, ProcessId>>;
+type IdDatabase = Wrapped<HashMap<ProjectId, u64>>;
+type ProcessesDatabase = Wrapped<HashMap<ProcessId, ProcessDatas>>;
 
-#[derive(Clone, Getters)]
+#[derive(Clone)]
 pub struct State {
-    id_database: Wrapped<HashMap<ProjectId, u64>>,
-    notifier_hub: Wrapped<NotifierHub<Arc<Notif>, ProcessId>>,
-    processes: Wrapped<HashMap<ProcessId, ProcessDatas>>,
+    id_database: IdDatabase,
+    notifier_hub: Hub,
+    processes: ProcessesDatabase,
+    config: DaemonConfig,
     pub daemon_sock: SocketAddr,
 }
 
@@ -36,13 +39,40 @@ impl Debug for State {
 }
 
 impl State {
-    pub fn new(daemon_sock: SocketAddr) -> Self {
-        Self {
+    pub fn new(daemon_sock: SocketAddr) -> Result<Self> {
+        if DaemonConfig::is_running() {
+            bail!("Daemon is already running.")
+        } else {
+        }
+        let config = DaemonConfig::load_or_generate().context("Failed to generate config.")?;
+
+        Ok(Self {
             daemon_sock,
+            config: config,
             id_database: Wrapped::default(),
             notifier_hub: Wrapped::default(),
             processes: Wrapped::default(),
-        }
+        })
+    }
+
+    pub fn config(&mut self) -> Result<DaemonConfig> {
+        Ok(self.config)
+    }
+
+    pub fn notifier_hub(&self) -> &Hub {
+        &self.notifier_hub
+    }
+
+    pub fn id_database(&self) -> &IdDatabase {
+        &self.id_database
+    }
+
+    pub fn processes(&self) -> &ProcessesDatabase {
+        &self.processes
+    }
+
+    pub fn daemon_sock(&self) -> &SocketAddr {
+        &self.daemon_sock
     }
 
     pub async fn remove_process(&self, pid: &ProcessId) -> Result<Option<ProcessDatas>> {

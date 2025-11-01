@@ -252,6 +252,8 @@ impl MessageTrait for AckMessage {
 pub enum FetcherMessage {
     /// Encapsulates a build object (binary data).
     Object(Vec<u8>),
+    /// Indicates the object has been fully transmitted.
+    Eof,
     /// Indicated that the fetch failed
     Failed,
 }

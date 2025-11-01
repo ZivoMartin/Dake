@@ -1,6 +1,7 @@
 use std::{
     fmt::Display,
     net::{IpAddr, SocketAddr},
+    path::PathBuf,
 };
 
 use derive_getters::Getters;
@@ -37,5 +38,16 @@ impl RemoteMakefile {
 
     pub fn ip(&self) -> IpAddr {
         self.sock.ip()
+    }
+
+    pub fn guess_path(pos: PathBuf) -> Option<PathBuf> {
+        const DEFAULT_PATH_CANDIDATES: [&str; 4] =
+            ["dake_tmp_makefile", "Makefile", "makefile", "GNUMakefile"];
+
+        DEFAULT_PATH_CANDIDATES
+            .iter()
+            .map(|path| pos.join(path))
+            .find(|path| path.try_exists().unwrap_or(false))
+            .map(PathBuf::from)
     }
 }

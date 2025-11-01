@@ -24,6 +24,25 @@ use crate::{
 use tokio::select;
 use tracing::{error, info, warn};
 
+fn remove_x_and_next<T: PartialEq + Clone>(v: &[T], x: T) -> Vec<T> {
+    let mut skip_next = false;
+    v.iter()
+        .filter(|val| {
+            if skip_next {
+                skip_next = false;
+                return false;
+            }
+            if **val == x {
+                skip_next = true; // skip the next element
+                false
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect()
+}
+
 /// Handles the creation and supervision of a new distributed `make` process.
 ///
 /// # Workflow
@@ -41,11 +60,7 @@ pub async fn new_process<'a>(
     info!("Starting new process handler for pid = {pid} with args = {args:?}.");
 
     let daemon_addr = state.daemon_sock.clone();
-
-    if daemon_addr != pid.sock() {
-        error!("Mismatched sockets");
-        return;
-    }
+    let file_less_args = remove_x_and_next(&args, "--file".to_string()); // Removing --file args
 
     // --- Step 1: Distribute remote makefiles ---
     let involved_hosts: Vec<_> = makefiles
@@ -58,7 +73,7 @@ pub async fn new_process<'a>(
         pid.clone(),
         daemon_addr,
         involved_hosts.clone(),
-        args.clone(),
+        file_less_args,
     );
 
     match distribute(pid.clone(), makefiles, process_datas.clone()).await {
@@ -106,12 +121,19 @@ pub async fn new_process<'a>(
 
     let hub = state.notifier_hub().clone();
     let mut subscriber = hub.lock().await.subscribe(&pid, 100);
+    let mut make = Box::pin(execute_make(
+        &state,
+        pid.clone(),
+        pid.path().clone(),
+        None,
+        &args,
+    ));
 
     // Exit code placeholder — filled either by make completion or notification
     let exit_code = loop {
         select! {
             // Handle local make process completion
-            result = execute_make(&state, pid.clone(), pid.path().clone(), None, &args) => {
+            result = &mut make => {
                 info!("Make process is done.");
                 break match result {
                     Ok(Some(status)) => {

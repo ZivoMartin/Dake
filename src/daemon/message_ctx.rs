@@ -1,4 +1,4 @@
-use crate::{daemon::state::State, network::Stream, process_id::ProcessId};
+use crate::{daemon::State, network::Stream, process_id::ProcessId};
 
 /// Context for handling a message, including current state and sender info.
 pub struct MessageCtx<'a> {

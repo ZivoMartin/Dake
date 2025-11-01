@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 
 use crate::{
-    daemon::{operations::wait_acks, state::State},
+    daemon::{State, operations::wait_acks},
     network::{DaemonMessage, Message, broadcast_message},
     process_id::ProcessId,
 };

@@ -76,26 +76,45 @@ pub async fn get_container_ip(container_id: &str, network: &str) -> Result<Strin
     Ok(ip.clone())
 }
 
-/// Copy files into a container
-pub async fn copy_into_container(container: &str, src_dir: &Path, dest_dir: &Path) -> Result<()> {
+async fn exec_docker_cp(src: &str, dest: &str) -> Result<()> {
     let status = Command::new("docker")
-        .args([
-            "cp",
-            src_dir
-                .to_str()
-                .context("Source directory is not displayable.")?,
-            &format!(
-                "{container}:{}",
-                dest_dir
-                    .to_str()
-                    .context("Destination directory is not displayable.")?
-            ),
-        ])
+        .args(["cp", src, dest])
         .status()
         .await
         .context("Failed to copy project files to container")?;
     assert!(status.success(), "docker cp failed");
     Ok(())
+}
+
+/// Copy files into a container
+pub async fn copy_into_container(container: &str, src_dir: &Path, dest_dir: &Path) -> Result<()> {
+    exec_docker_cp(
+        src_dir
+            .to_str()
+            .context("Source directory is not displayable.")?,
+        &format!(
+            "{container}:{}",
+            dest_dir
+                .to_str()
+                .context("Destination directory is not displayable.")?
+        ),
+    )
+    .await
+}
+
+pub async fn pull_of_container(container: &str, src_dir: &Path, dest_dir: &Path) -> Result<()> {
+    exec_docker_cp(
+        &format!(
+            "{container}:{}",
+            src_dir
+                .to_str()
+                .context("Destination directory is not displayable.")?
+        ),
+        dest_dir
+            .to_str()
+            .context("Source directory is not displayable.")?,
+    )
+    .await
 }
 
 pub async fn container_exec(

@@ -27,13 +27,13 @@ use tracing::{info, warn};
 
 use crate::{
     daemon::{
+        State,
         fs::init_fs,
         handlers::{
             OutputFile, handle_done, handle_error, handle_fetch, handle_fresh_request, handle_log,
             new_process, receiv_makefile,
         },
         message_ctx::MessageCtx,
-        state::State,
     },
     dec,
     network::{
@@ -84,7 +84,7 @@ pub async fn start() -> Result<()> {
         .context("Failed to fetch local unix addr: {e:?}")?;
 
     // Initialising state
-    let state = State::new(daemon_tcp_sock);
+    let state = State::new(daemon_tcp_sock).context("Failed to init state.")?;
 
     // Spawn two tasks, one per listener
     let (tx, mut rx) = channel(100);

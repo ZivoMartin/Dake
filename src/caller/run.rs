@@ -11,11 +11,11 @@ use std::{env::current_dir, fs::write};
 
 use crate::{
     caller::{fetch_id::fetch_fresh_id, start::start},
+    daemon::DaemonId,
     lexer::guess_path_and_lex,
     makefile::RemoteMakefileSet,
     network::{connect_with_daemon_or_start_it, get_daemon_tcp_sock, get_daemon_unix_sock},
     process_id::ProjectId,
-    utils::get_dake_path,
 };
 use anyhow::{Context, Result};
 use tokio::fs::remove_file;
@@ -29,7 +29,9 @@ const TMP_MAKEFILE_NAME: &'static str = "dake_tmp_makefile";
 pub async fn make(mut args: Vec<String>) -> Result<i32> {
     let daemon_unix_sock = get_daemon_unix_sock()?;
     info!("Fetched daemon_unix_sock successfully: {daemon_unix_sock}");
-    let daemon_tcp_sock = get_daemon_tcp_sock()?;
+    let daemon_tcp_sock = get_daemon_tcp_sock()?
+        .get_tcp()
+        .context("Tcp sock is actually unix sock.")?;
     info!("Fetched daemon_tcp_sock successfully: {daemon_tcp_sock}");
 
     let caller_dir = current_dir()?;
@@ -46,13 +48,13 @@ pub async fn make(mut args: Vec<String>) -> Result<i32> {
     info!("Connected to the daemon successfully.");
 
     // Step 3: Fetch a fresh process id
-    let project_id = ProjectId::new(daemon_tcp_sock, caller_dir.clone());
+    let tmp_project_id = ProjectId::new(DaemonId::default(), caller_dir.clone());
 
-    info!("Fetching pid for project {project_id:?}.");
-    let pid = fetch_fresh_id(&mut stream, project_id).await?;
+    info!("Fetching pid for project {tmp_project_id:?}.");
+    let pid = fetch_fresh_id(&mut stream, tmp_project_id).await?;
 
     // Step 4: Generate makefiles
-    let makefiles = RemoteMakefileSet::generate(tokens, pid.clone(), get_dake_path()?)
+    let makefiles = RemoteMakefileSet::generate(tokens, daemon_tcp_sock, pid.clone())
         .context("Failed to generate makefiles.")?;
     info!("Generated RemoteMakefileSet for daemon");
 

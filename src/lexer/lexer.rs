@@ -11,17 +11,17 @@
 //!
 //! The lexer output is consumed later to build distributed makefile sets.
 
-use crate::lexer::{
-    directive::DIRECTIVE_PREFIX,
-    target_label::TargetLabel,
-    tokens::{Line, Token},
+use crate::{
+    lexer::{
+        directive::DIRECTIVE_PREFIX,
+        target_label::TargetLabel,
+        tokens::{Line, Token},
+    },
+    makefile::RemoteMakefile,
 };
 use anyhow::{Context, Result};
-use std::{fs::File, io::Read, path::Path};
+use std::{env::current_dir, fs::File, io::Read, path::PathBuf};
 use tracing::{info, warn};
-
-/// Default filenames to try when searching for a Makefile.
-const DEFAULT_PATH_CANDIDATES: [&str; 3] = ["Makefile", "makefile", "GNUMakefile"];
 
 /// Error message if no Makefile was found.
 const NO_MAKEFILE_FOUND: &str = "dake: *** No targets specified and no makefile found.  Stop.";
@@ -177,12 +177,12 @@ pub fn lex(s: String) -> Result<LexingOutput> {
 ///
 /// # Errors
 /// Fails if file cannot be opened, read, or lexed.
-pub fn lex_from_path(path: &str) -> Result<LexingOutput> {
-    let mut f = File::open(&path).context(format!("When opening the file {path}."))?;
+pub fn lex_from_path(path: PathBuf) -> Result<LexingOutput> {
+    let mut f = File::open(&path).context(format!("When opening the file {}.", path.display()))?;
     let mut content = String::new();
     f.read_to_string(&mut content)
-        .context(format!("When reading the file {path}."))?;
-    info!("Lexer: Successfully read file {}", path);
+        .context(format!("When reading the file {}.", path.display()))?;
+    info!("Lexer: Successfully read file {}", path.display());
 
     lex(content)
 }
@@ -192,11 +192,7 @@ pub fn lex_from_path(path: &str) -> Result<LexingOutput> {
 /// # Errors
 /// Fails if no Makefile is found in the current directory.
 pub fn guess_path_and_lex() -> Result<LexingOutput> {
-    let path = DEFAULT_PATH_CANDIDATES
-        .iter()
-        .find(|path| Path::new(path).try_exists().unwrap_or(false))
-        .context(NO_MAKEFILE_FOUND)?;
-    info!("Lexer: Using Makefile at path {}", path);
-
+    let current_dir = current_dir().context("Failed to fetch current dir.")?;
+    let path = RemoteMakefile::guess_path(current_dir).context(NO_MAKEFILE_FOUND)?;
     lex_from_path(path)
 }

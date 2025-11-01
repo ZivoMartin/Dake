@@ -10,9 +10,9 @@ use crate::{
     lexer::{Directive, TargetLabel, Token},
     makefile::{RemoteMakefile, RemoteMakefileSet},
     network::DEFAULT_PORT,
-    process_id::{ProcessId, ProjectId},
+    process_id::ProcessId,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
@@ -34,23 +34,13 @@ impl RemoteMakefileSet {
     ///
     /// # Returns
     /// A new [`RemoteMakefileSet`] containing the distributed makefiles.
-    pub fn generate(
-        tokens: Vec<Token>,
-        ProcessId {
-            id,
-            project_id: ProjectId { sock, path },
-        }: ProcessId,
-        dake_path: PathBuf,
-    ) -> Result<Self> {
+    pub fn generate(tokens: Vec<Token>, sock: SocketAddr, pid: ProcessId) -> Result<Self> {
         info!(
             "RemoteMakefileSet: Starting generation with {} tokens",
             tokens.len()
         );
 
-        let sock = sock
-            .get_tcp()
-            .context("The socket address in the process id is a unix socket.")?;
-
+        let path = pid.path().clone();
         let mut full_fetch_makefile = String::new();
         let mut saw_ips = HashSet::from([sock]);
         let mut makefiles = vec![RemoteMakefile::new(String::new(), sock)];
@@ -69,11 +59,8 @@ impl RemoteMakefileSet {
                 },
             };
             format!(
-                "{binary} fetch \"{project_path}\" \"{project_sock}\" {process_id} {label_sock} {label_path} \"{target}\"\n",
-                binary = dake_path.display(),
-                project_path = path.display(),
-                project_sock = sock.to_string(),
-                process_id = id,
+                "dake fetch {process_id} {label_sock} {label_path} \"{target}\"\n",
+                process_id = pid,
                 label_sock = label.sock
             )
         };

@@ -30,21 +30,18 @@ use crate::{
 /// # Notes
 /// This function does not stop on daemon-side errors immediately — it may wait
 /// after a `FetcherMessage::Failed` to allow parent synchronization.
-#[tracing::instrument]
+#[tracing::instrument(skip(labeled_path, pid))]
 pub async fn fetch(
     target: String,
     labeled_path: Option<PathBuf>,
-    caller_path: PathBuf,
-    caller_sock: SocketAddr,
-    id: u64,
+    pid: ProcessId,
     sock: SocketAddr,
 ) -> Result<()> {
-    let pid = ProcessId::new(id, sock.clone(), caller_path);
     info!("Fetcher started for target '{}' with PID {:?}", target, pid);
 
     // --- Step 1: Connect to remote daemon ---
     info!("Connecting with the daemon...");
-    let mut stream = connect(caller_sock)
+    let mut stream = connect(sock.clone())
         .await
         .context("Failed to connect with the daemon.")?;
     info!("Connected successfully.");
@@ -107,6 +104,10 @@ pub async fn fetch(
                 writer
                     .write_all(&obj)
                     .with_context(|| format!("Failed writing object data for target '{target}'"))?;
+            }
+            FetcherMessage::Eof => {
+                info!("Received EOF message, end of fetching stage.");
+                break;
             }
             FetcherMessage::Failed => {
                 error!(
