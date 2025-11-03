@@ -7,6 +7,7 @@ use std::{
 use tracing::{info, warn};
 
 use crate::{
+    constants::{CHUNK_SIZE, EXIT_CODE_FAILURE},
     daemon::{MessageCtx, execute_make, fs::get_makefile_path},
     network::{DaemonMessage, FetcherMessage, Message, Stream, send_message, write_message},
 };
@@ -50,7 +51,7 @@ pub async fn handle_fetch<'a>(
         let msg = Message::new(
             DaemonMessage::MakeError {
                 guilty_node: daemon_sock.clone(),
-                exit_code: 1,
+                exit_code: EXIT_CODE_FAILURE,
             },
             pid.clone(),
         );
@@ -176,7 +177,7 @@ pub async fn handle_fetch<'a>(
 
     info!("Streaming file '{target}' to {client}");
     loop {
-        let mut buf = vec![0; 8192];
+        let mut buf = vec![0; CHUNK_SIZE];
         let n = match reader.read(&mut buf) {
             Ok(n) => n,
             Err(e) => warn_and_forward!("Failed to read {path:?}: {e:?}", err),

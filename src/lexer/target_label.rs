@@ -10,16 +10,12 @@
 //! Parsing is provided via [`FromStr`], allowing convenient conversion from
 //! string labels in Makefiles.
 
-use std::{
-    net::{IpAddr, SocketAddr},
-    path::PathBuf,
-    str::FromStr,
-};
+use std::{path::PathBuf, str::FromStr};
 
 use anyhow::{Error, Result};
 use tracing::info;
 
-use crate::network::DEFAULT_PORT;
+use crate::lexer::HostId;
 
 /// Represents a label for a build target in a distributed makefile.
 ///
@@ -29,19 +25,15 @@ use crate::network::DEFAULT_PORT;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TargetLabel {
     /// The socket (IP + port) of the remote daemon.
-    pub sock: SocketAddr,
+    pub id: HostId,
     /// Optional build directory associated with this target.
     pub path: Option<PathBuf>,
 }
 
 impl TargetLabel {
     /// Creates a new [`TargetLabel`] from a socket and optional path.
-    pub fn new(sock: SocketAddr, path: Option<PathBuf>) -> Self {
-        Self { sock, path }
-    }
-
-    pub fn ip(&self) -> IpAddr {
-        self.sock.ip()
+    pub fn new(id: HostId, path: Option<PathBuf>) -> Self {
+        Self { id, path }
     }
 }
 
@@ -51,33 +43,26 @@ impl FromStr for TargetLabel {
     /// Parses a string into a [`TargetLabel`].
     ///
     /// # Supported formats
-    /// - `"IP:PORT"` → uses provided port
-    /// - `"IP"` → defaults to [`DEFAULT_PORT`]
-    /// - `"IP:PORT|PATH"` → with optional build directory path and port
-    /// - `"IP|PATH"` → with optional build directory path
+    /// - `"IP:PORT"` -> uses provided port
+    /// - `"IP"` -> defaults to [`DEFAULT_PORT`]
+    /// - `"IP:PORT|PATH"` -> with optional build directory path and port
+    /// - `"IP|PATH"` -> with optional build directory path
     fn from_str(s: &str) -> Result<Self> {
-        let parse_sock = |sock: &str| -> Result<SocketAddr> {
-            sock.parse::<SocketAddr>().or_else(|_| {
-                // If no port provided, fall back to DEFAULT_PORT
-                Ok(SocketAddr::new(sock.parse()?, DEFAULT_PORT))
-            })
-        };
-
         Ok(match s.rsplit_once('|') {
             Some((sock, path)) => {
-                let addr = parse_sock(sock)?;
+                let id = sock.parse::<HostId>()?;
 
                 let path_buf: PathBuf = path.parse()?;
                 info!(
-                    "TargetLabel: Parsed '{}' into addr={}, path={:?}",
-                    s, addr, path_buf
+                    "TargetLabel: Parsed '{}' into id={:?}, path={:?}",
+                    s, id, path_buf
                 );
-                TargetLabel::new(addr, Some(path_buf))
+                TargetLabel::new(id, Some(path_buf))
             }
             None => {
-                let addr = parse_sock(s)?;
-                info!("TargetLabel: Parsed '{}' into addr={}, no path", s, addr);
-                TargetLabel::new(addr, None)
+                let id = s.parse::<HostId>()?;
+                info!("TargetLabel: Parsed '{}' into addr={:?}, no path", s, id);
+                TargetLabel::new(id, None)
             }
         })
     }

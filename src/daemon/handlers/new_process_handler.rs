@@ -18,6 +18,7 @@ use crate::{
         MessageCtx, Notif, broadcast_done, distribute, execute_make, handlers::OutputFile,
         process_datas::ProcessDatas,
     },
+    lock,
     makefile::RemoteMakefile,
     network::{Message, ProcessMessage, SocketAddr, write_message},
 };
@@ -119,8 +120,19 @@ pub async fn new_process<'a>(
     // ;--- Step 3: Execute local make process ---
     info!(?pid, args = ?args, dir = ?pid.path(), "Launching local make process");
 
-    let hub = state.notifier_hub().clone();
-    let mut subscriber = hub.lock().await.subscribe(&pid, 100);
+    let mut subscriber = {
+        let notifier_hub = state.notifier_hub().clone();
+        let mut notifier_hub = match lock!(notifier_hub).await {
+            Ok(hub) => hub,
+            Err(e) => {
+                warn!("Failed to lock notifier_hub: {e}");
+                return;
+            }
+        };
+
+        notifier_hub.subscribe(&pid, 100)
+    };
+
     let mut make = Box::pin(execute_make(
         &state,
         pid.clone(),

@@ -21,3 +21,25 @@ macro_rules! wrap {
         std::sync::Arc::new(tokio::sync::Mutex::new($name))
     };
 }
+
+#[macro_export]
+macro_rules! lock {
+    ($mutex:expr) => {
+        lock!($mutex, crate::constants::MUTEX_LOCK_TIMEOUT)
+    };
+    ($mutex:expr, $dur:expr) => {{
+        async {
+            use anyhow::bail;
+            use tokio::time::sleep;
+
+            tokio::select! {
+                _ = sleep($dur) => {
+                    bail!("Lock for mutex timed out.");
+                }
+                guard = $mutex.lock() => {
+                    Ok(guard)
+                }
+            }
+        }
+    }};
+}

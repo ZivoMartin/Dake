@@ -3,19 +3,18 @@ use std::{
     fs::read_to_string,
     path::PathBuf,
     process::{ExitStatus, Stdio},
-    time::Duration,
 };
 use tokio::{
     io::{AsyncReadExt, BufReader},
     process::Command,
     select, spawn,
     task::JoinHandle,
-    time::sleep,
 };
 use tracing::{error, info, warn};
 
 use crate::{
     daemon::{Notif, State},
+    lock,
     makefile::RemoteMakefile,
     network::{DaemonMessage, Message, SocketAddr, connect, write_message},
     process_id::ProcessId,
@@ -50,6 +49,13 @@ pub async fn execute_make(
         pid, current_dir
     );
 
+    if let Some(target) = &target {
+        state
+            .lock_target(pid.project_id.clone(), target.clone())
+            .await
+            .context("Failed to lock the target before executing make")?
+    }
+
     let path = RemoteMakefile::guess_path(current_dir.clone())
         .context(format!("There is no makefile at {}", current_dir.display()))?;
     info!("Full path to the makefile: {}", path.display());
@@ -73,7 +79,7 @@ pub async fn execute_make(
 
     let mut cmd = Command::new("make");
 
-    if let Some(target) = target {
+    if let Some(target) = &target {
         if !target.is_empty() {
             cmd.arg(target);
         }
@@ -162,16 +168,12 @@ pub async fn execute_make(
     // --- Step 4: Subscribe to notifier hub for process cancellation ---
     info!("Subscribing to notifier hub for PID {:?}", pid);
     let subscriber = {
-        let hub = state.notifier_hub();
-        let timeout = Box::pin(sleep(Duration::from_secs(5)));
-
-        select! {
-            _ = timeout => {
-                warn!("Timeout while trying to acquire notifier_hub lock");
+        let notifier_hub = state.notifier_hub().clone();
+        match lock!(notifier_hub).await {
+            Ok(mut notifier_hub) => Some(notifier_hub.subscribe(&pid, 100)),
+            Err(e) => {
+                warn!("Failed to lock notifier_hub: {e}");
                 None
-            }
-            mut notifier_hub = hub.lock() => {
-                Some(notifier_hub.subscribe(&pid, 100))
             }
         }
     };
@@ -226,6 +228,13 @@ pub async fn execute_make(
         if let Err(e) = handle.await {
             warn!("One of the log handlers panicked or failed: {e:?}");
         }
+    }
+
+    if let Some(target) = target {
+        state
+            .unlock_target(pid.project_id, target)
+            .await
+            .context("Failed to unlock the target after executing make")?
     }
 
     Ok(Some(exit_status))

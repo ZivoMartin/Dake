@@ -4,6 +4,7 @@ use tracing::warn;
 
 use crate::{
     daemon::{MessageCtx, Notif},
+    lock,
     network::SocketAddr,
 };
 
@@ -18,12 +19,26 @@ pub async fn handle_error<'a>(
         exit_code,
     };
 
-    match state.notifier_hub().lock().await.arc_send(notif, &pid) {
-        Ok(w) => {
-            if let Err(e) = w.wait(Some(Duration::from_secs(1))).await {
-                warn!("Failed to wait for notif publication: {e:?}")
+    let w = {
+        let notifier_hub = state.notifier_hub().clone();
+        let notifier_hub = match lock!(notifier_hub).await {
+            Ok(hub) => hub,
+            Err(e) => {
+                warn!("Failed to lock notifier_hub: {e}");
+                return;
+            }
+        };
+
+        match notifier_hub.arc_send(notif, &pid) {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("The channel for {pid:?} was not initialised: {e:?}");
+                return;
             }
         }
-        Err(e) => warn!("The channel for {pid:?} was not initialised: {e:?}"),
+    };
+
+    if let Err(e) = w.wait(Some(Duration::from_secs(1))).await {
+        warn!("Failed to wait for notif publication: {e:?}")
     }
 }

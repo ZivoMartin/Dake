@@ -1,11 +1,10 @@
-use std::time::Duration;
-
 use notifier_hub::notifier::ChannelState;
-use tokio::{select, time::sleep};
 use tracing::{info, warn};
 
 use crate::{
+    constants::DONE_NOTIFICATION_TIMEOUT,
     daemon::{MessageCtx, Notif},
+    lock,
     network::{AckMessage, Message, write_message},
 };
 
@@ -21,34 +20,29 @@ pub async fn handle_done<'a>(MessageCtx { pid, state, stream }: MessageCtx<'a>) 
 
     let waiter = {
         let hub = state.notifier_hub();
-        let sleep_fut = Box::pin(sleep(Duration::from_secs(5)));
-        select! {
-            _ = sleep_fut => {
+        match lock!(hub).await {
+            Ok(notifier_hub) => match notifier_hub.channel_state(&pid) {
+                ChannelState::Uninitialised => None,
+                ChannelState::Running => match notifier_hub.arc_send(Notif::Done, &pid) {
+                    Ok(w) => Some(w),
+                    Err(e) => {
+                        warn!("Failed to publish the done notification over notifier_hub {e:?}");
+                        None
+                    }
+                },
+                ChannelState::Over => {
+                    warn!("The channel {pid:?} is not already over in notifier_hub.");
+                    None
+                }
+            },
+            Err(_) => {
                 warn!("Failed to lock notifier_hub");
                 None
-            }
-            notifier_hub = hub.lock() => {
-                match notifier_hub.channel_state(&pid) {
-                    ChannelState::Uninitialised => None,
-                    ChannelState::Running => {
-                        match notifier_hub.arc_send(Notif::Done, &pid) {
-                            Ok(w) => Some(w),
-                            Err(e) => {
-                                warn!("Failed to publish the done notification over notifier_hub {e:?}");
-                                None
-                            }
-                        }
-                    }
-                    ChannelState::Over => {
-                        warn!("The channel {pid:?} is not already over in notifier_hub.");
-                        None
-                    },
-                }
             }
         }
     };
     if let Some(w) = waiter {
-        if let Err(e) = w.wait(Some(Duration::from_secs(3))).await {
+        if let Err(e) = w.wait(Some(DONE_NOTIFICATION_TIMEOUT)).await {
             warn!("Failed to wait for done notif publication: {e:?}")
         }
     }

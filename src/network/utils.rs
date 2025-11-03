@@ -9,7 +9,6 @@ use std::{
     net::{IpAddr, UdpSocket},
     path::PathBuf,
     process::Command,
-    time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
@@ -21,6 +20,7 @@ use tokio::{
 use tracing::{error, info, warn};
 
 use crate::{
+    constants::{DAEMON_RETRY_INTERVAL, DAEMON_STARTUP_TIMEOUT},
     dec, enc,
     env_variables::EnvVariable,
     network::{
@@ -162,11 +162,11 @@ pub async fn connect_with_daemon_or_start_it(daemon_addr: SocketAddr) -> Result<
                                 if let Ok(stream) = connect(thread_daemon_addr.clone()).await {
                                     break stream;
                                 }
-                                sleep(Duration::from_millis(5)).await;
+                                sleep(DAEMON_RETRY_INTERVAL).await;
                             }
                         });
 
-                        return match timeout(Duration::from_secs(1), connections).await {
+                        return match timeout(DAEMON_STARTUP_TIMEOUT, connections).await {
                             Ok(Ok(stream)) => {
                                 info!("Daemon is responsive, connected successfully");
                                 Ok(stream)

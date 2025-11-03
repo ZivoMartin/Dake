@@ -10,6 +10,7 @@ pub mod fetch;
 pub mod network;
 pub mod process_id;
 
+mod constants;
 mod env_variables;
 mod lexer;
 mod macros;

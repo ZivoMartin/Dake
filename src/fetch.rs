@@ -2,7 +2,6 @@ use std::{
     fs::OpenOptions,
     io::{BufWriter, Write},
     path::PathBuf,
-    time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -10,6 +9,7 @@ use tokio::time::sleep;
 use tracing::{error, info, warn};
 
 use crate::{
+    constants::FETCH_FAILURE_DELAY,
     dec,
     network::{
         DaemonMessage, FetcherMessage, Message, MessageKind, SocketAddr, connect,
@@ -117,7 +117,7 @@ pub async fn fetch(
                 );
                 // Wait for parent to send Done notification before terminating
                 // This prevents premature process cleanup that could cause spurious errors
-                sleep(Duration::from_secs(90)).await;
+                sleep(FETCH_FAILURE_DELAY).await;
             }
         }
     }

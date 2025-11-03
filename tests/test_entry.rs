@@ -46,9 +46,9 @@ async fn integration_suite() -> Result<()> {
     let cluster = setup_cluster().await?;
 
     let result = tokio::try_join!(
-        // run(cluster, test_basic_build(), 0),
+        run(cluster, test_basic_build(), 0),
         // run(cluster, test_fetch_chain_build(), 1),
-        run(cluster, test_redundant_build(), 0),
+        // run(cluster, test_redundant_build(), 0),
     );
 
     clean_cluster().await?;

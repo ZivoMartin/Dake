@@ -15,6 +15,9 @@ pub enum Notif {
         exit_code: i32,
         guilty_node: SocketAddr,
     },
+
+    /// The target is unlock
+    TargetUnlock { target: String },
 }
 
 impl Notif {
@@ -32,6 +35,7 @@ impl Notif {
                     exit_code, guilty_node
                 )
             }
+            Notif::TargetUnlock { target } => info!("New target just unlocked: {target}"),
         }
     }
 }

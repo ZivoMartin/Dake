@@ -102,7 +102,7 @@ pub enum MessageKind {
 static HEADER_LENGTH: OnceCell<usize> = OnceCell::new();
 
 impl MessageHeader {
-    const SIZE: usize = 9;
+    const SIZE: usize = 8 /* u64 size */ + 1 /* kind tag */;
 
     /// Creates a new [`MessageHeader`].
     pub fn new(size: u64, kind: MessageKind) -> Self {

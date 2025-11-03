@@ -7,7 +7,7 @@
 //! makefiles are stored separately.
 
 use crate::{
-    lexer::{Directive, TargetLabel, Token},
+    lexer::{Directive, HostId, TargetLabel, Token},
     makefile::{RemoteMakefile, RemoteMakefileSet},
     network::DEFAULT_PORT,
     process_id::ProcessId,
@@ -48,21 +48,22 @@ impl RemoteMakefileSet {
 
         // Utility closure to construct fetch commands
         let get_fetch_command = |root_path_set: &HashMap<SocketAddr, PathBuf>,
-                                 label: TargetLabel,
+                                 TargetLabel { id, path }: TargetLabel,
                                  target: String|
-         -> String {
-            let label_path = match label.path {
+         -> Result<String> {
+            let sock = id.resolve()?;
+            let label_path = match path {
                 Some(label_path) => format!("--labeled-path {}", label_path.display()),
-                None => match root_path_set.get(&label.sock) {
+                None => match root_path_set.get(&sock) {
                     Some(label_path) => format!("--labeled-path {}", label_path.display()),
                     None => String::new(),
                 },
             };
-            format!(
+            Ok(format!(
                 "dake fetch {process_id} {label_sock} {label_path} \"{target}\"\n",
                 process_id = pid,
-                label_sock = label.sock
-            )
+                label_sock = sock.ip()
+            ))
         };
 
         // Process tokens
@@ -82,27 +83,27 @@ impl RemoteMakefileSet {
                     label,
                     command,
                 } => {
-                    let label = label.unwrap_or_else(|| TargetLabel::new(sock, None));
+                    let label =
+                        label.unwrap_or_else(|| TargetLabel::new(HostId::Socket(sock), None));
                     info!(
                         "RemoteMakefileSet: Processing target '{}' for label {:?}",
                         target, label
                     );
 
+                    let sock = label.id.clone().resolve()?;
+
                     // Add a new makefile for this IP if not already seen
-                    if saw_ips.insert(label.sock.clone()) {
+                    if saw_ips.insert(sock) {
                         info!(
                             "RemoteMakefileSet: Adding new RemoteMakefile for sock {}",
-                            label.sock
+                            sock
                         );
-                        makefiles.push(RemoteMakefile::new(
-                            full_fetch_makefile.clone(),
-                            label.sock.clone(),
-                        ))
+                        makefiles.push(RemoteMakefile::new(full_fetch_makefile.clone(), sock))
                     }
 
                     // Build fetch and default rules
                     let fetch_command =
-                        get_fetch_command(&root_path_set, label.clone(), target.clone());
+                        get_fetch_command(&root_path_set, label.clone(), target.clone())?;
 
                     let fetch = format!("{target}:\n\t{fetch_command}\n");
                     let default = format!("{target}:{command}");
@@ -111,7 +112,7 @@ impl RemoteMakefileSet {
 
                     // Distribute rules across makefiles
                     for m in makefiles.iter_mut() {
-                        m.push_content(if m.ip() == label.ip() {
+                        m.push_content(if m.ip() == sock.ip() {
                             &default
                         } else {
                             &fetch

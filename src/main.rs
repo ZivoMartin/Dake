@@ -32,7 +32,12 @@ use tracing::info;
 /// If no subcommand is specified, the arguments are forwarded
 /// to the `caller` mode (make interception).
 #[derive(Parser, Debug)]
-#[command(infer_subcommands = true, allow_external_subcommands = true)]
+#[command(
+    infer_subcommands = true,
+    allow_external_subcommands = true,
+    version, // ★ Added: enables `--version` and `-V` automatically
+    about = "Dake - Distributed Make system"
+)]
 struct Cli {
     /// Optional Dake subcommand (e.g., daemon, fetch, clean)
     #[command(subcommand)]
@@ -67,6 +72,9 @@ enum Commands {
 
     /// Start the Dake daemon
     Daemon,
+
+    /// Show Dake version information
+    Version,
 }
 
 /// Entry point of the application.
@@ -102,6 +110,12 @@ async fn main() -> anyhow::Result<ExitCode> {
         Some(Commands::Clean) => {
             info!("Cleaning dake space..");
             fs::clean()?;
+            0
+        }
+
+        Some(Commands::Version) => {
+            // ★ Added: explicit subcommand for version display
+            println!("Dake {}", env!("CARGO_PKG_VERSION"));
             0
         }
 
