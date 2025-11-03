@@ -1,4 +1,4 @@
-# Dake — Distributed Makefile System
+# Dake - Distributed Makefile System
 
 Dake is a distributed build system that extends traditional Makefiles to work seamlessly across multiple machines. It allows you to assign build targets to different hosts, automatically handle dependency fetching, and run remote builds with minimal overhead. The system is designed to be **fully compatible with standard Makefile syntax** while enabling transparent distribution.
 
